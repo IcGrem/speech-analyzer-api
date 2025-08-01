@@ -31,7 +31,7 @@ async def login(
         key="Authorization",
         value=f"Bearer {access_token}",
         httponly=True,
-        secure=True,
+        secure=False,
         samesite="strict"
     )
     return user
