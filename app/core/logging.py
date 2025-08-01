@@ -25,6 +25,14 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
+def get_function_logger(func_name: str = None) -> logging.Logger:
+    """Получение логгера для функции"""
+    if func_name is None:
+        import inspect
+        func_name = inspect.currentframe().f_back.f_code.co_name
+    return get_logger(func_name)
+
+
 class LoggerMixin:
     """Mixin для добавления логгера в классы"""
     

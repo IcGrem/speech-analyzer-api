@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-from app.core.logging import LoggerMixin
+from app.core.logging import get_logger
 from app.schemas.users import TokenData
 from app.core.config import settings
 from app.crud.users import user_crud
@@ -51,7 +51,7 @@ class OAuth2PasswordBearerCookie(OAuth2):
 
 
 security = OAuth2PasswordBearerCookie(token_url=f"{settings.API_PREFIX}/users/login")
-log = LoggerMixin()
+logger = get_logger(__name__)
 
 async def get_current_user(
         security_scopes: SecurityScopes,
@@ -63,7 +63,7 @@ async def get_current_user(
         authenticate_value = f'Bearer scope="{security_scopes.scope_str}"'
     else:
         authenticate_value = f"Bearer"
-    log.logger.debug(f'GET CURRENT USER ---> token: {token}')
+    logger.debug(f'GET CURRENT USER ---> token: {token}')
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -71,20 +71,20 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(token, str(settings.SECRET_KEY), algorithms=["HS256"])
-        log.logger.debug(f'GET CURRENT USER ---> payload: {payload}')
+        logger.debug(f'GET CURRENT USER ---> payload: {payload}')
         username: str = payload.get("sub")
-        log.logger.debug(f'GET CURRENT USER ---> username: {username}')
+        logger.debug(f'GET CURRENT USER ---> username: {username}')
         if username is None:
-            log.logger.error(f'GET CURRENT USER ---> username is None')
+            logger.error(f'GET CURRENT USER ---> username is None')
             raise credentials_exception
         token_scopes = payload.get("scopes", '')
         token_data = TokenData(scopes=token_scopes, username=username)
     except (JWTError, ValidationError) as e:
-        log.logger.error(f'GET CURRENT USER ---> JWTError, ValidationError: {e}')
+        logger.error(f'GET CURRENT USER ---> JWTError, ValidationError: {e}')
         raise credentials_exception
 
     user = await user_crud.get_by_username(db=db, username=token_data.username)
-    log.logger.info(f'GET CURRENT USER ---> user: {user.username}')
+    logger.info(f'GET CURRENT USER ---> user: {user.username}')
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -96,7 +96,7 @@ async def get_current_user(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
         )
     in_scope = any(x in token_data.scopes for x in security_scopes.scopes)
-    log.logger.info(f'GET CURRENT USER ---> token_data.scopes: {token_data.scopes} | security_scopes.scopes: {security_scopes.scopes}')
+    logger.info(f'GET CURRENT USER ---> token_data.scopes: {token_data.scopes} | security_scopes.scopes: {security_scopes.scopes}')
     if not in_scope:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

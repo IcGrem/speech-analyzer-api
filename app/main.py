@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.db.session import get_db
 from app.api.v1.router import api_router
-from app.core.logging import setup_logging
+from app.core.logging import setup_logging, get_logger
 from app.services.main_services import ensure_admin_exists
 
 
@@ -14,14 +14,14 @@ async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения"""
     # Startup
     setup_logging()
-    
+    logger = get_logger(__name__)
     # Создание администратора по умолчанию при запуске
     try:
         async for db in get_db():
             await ensure_admin_exists(db)
             break
     except Exception as e:
-        print(f"Ошибка при создании администратора: {e}")
+        logger.error(f"Ошибка при создании администратора: {e}")
     
     yield
     # Shutdown

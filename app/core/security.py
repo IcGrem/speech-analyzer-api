@@ -3,8 +3,11 @@ from datetime import datetime, timedelta, timezone
 from jose import jwt
 
 from app.core.config import settings
+from app.core.logging import get_logger
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+logger = get_logger(__name__)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

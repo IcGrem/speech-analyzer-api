@@ -11,11 +11,13 @@ from app.models.users import User, UserRole
 from app.schemas.users import UserCreate
 from app.core.exceptions import UserAlreadyExistsError
 from app.db.session import async_session
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EnumEncoder(json.JSONEncoder):
+    """Кодировщик для Enum"""
     def default(self, obj):
         if isinstance(obj, Enum):
             return obj.name
