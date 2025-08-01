@@ -13,6 +13,10 @@ from app.schemas.dialogs import DialogCreate, DialogUpdate
 class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     """CRUD операции для модели Dialog"""
     
+    async def get_all(self, db: AsyncSession) -> List[Dialog]:
+        """Получить все диалоги"""
+        return await self.get_multi(db)
+    
     async def get_by_employee(self, db: AsyncSession, employee_id: UUID) -> List[Dialog]:
         """Получить все диалоги сотрудника"""
         return await self.get_multi(db, employee_id=employee_id)
