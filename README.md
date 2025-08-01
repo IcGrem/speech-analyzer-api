@@ -1,57 +1,5 @@
 # Speech Analyzer API
 
-API для анализа речи с использованием FastAPI и архитектуры "чистый код".
-
-## Структура проекта
-
-```
-speech-analyzer-api/
-├── app/
-│   ├── api/
-│   │   └── v1/
-│   │       ├── endpoints/
-│   │       │   ├── analysis.py
-│   │       │   └── health.py
-│   │       └── router.py
-│   ├── core/
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── exceptions.py
-│   │   └── logging.py
-│   ├── models/
-│   │   └── analysis.py
-│   ├── schemas/
-│   │   ├── analysis.py
-│   │   └── health.py
-│   ├── services/
-│   │   ├── analysis_service.py
-│   │   ├── health_service.py
-│   │   └── speech_processor.py
-│   └── main.py
-├── alembic/
-│   ├── versions/
-│   ├── env.py
-│   └── script.py.mako
-├── tests/
-│   ├── conftest.py
-│   ├── test_analysis.py
-│   └── test_health.py
-├── scripts/
-│   ├── docker-setup.sh
-│   ├── docker-dev.sh
-│   └── setup-docker-user.sh
-├── requirements.txt
-├── pyproject.toml
-├── alembic.ini
-├── env.example
-├── Dockerfile
-├── docker-compose.yml
-├── docker-compose.dev.yml
-├── nginx.conf
-├── .dockerignore
-└── Makefile
-```
-
 ## Быстрый старт с Docker
 
 ### Вариант 1: С sudo (рекомендуется для серверов)
@@ -206,14 +154,6 @@ dcp up -d
 dcp logs -f app
 ```
 
-## API Endpoints
-
-- `GET /api/v1/health/` - Проверка здоровья приложения
-- `POST /api/v1/analysis/` - Создание нового анализа речи
-- `GET /api/v1/analysis/` - Получение списка анализов
-- `GET /api/v1/analysis/{id}` - Получение конкретного анализа
-- `DELETE /api/v1/analysis/{id}` - Удаление анализа
-
 ## Тестирование
 
 ### С Docker
@@ -226,77 +166,3 @@ make test
 pytest
 ```
 
-## Линтинг и форматирование
-
-```bash
-# Форматирование кода
-black app tests
-
-# Сортировка импортов
-isort app tests
-
-# Проверка типов
-mypy app
-
-# Линтинг
-flake8 app tests
-```
-
-## Архитектура
-
-Проект следует принципам "чистого кода":
-
-- **Разделение ответственности**: каждый модуль имеет четкую зону ответственности
-- **Dependency Injection**: использование FastAPI dependency injection
-- **Слоистая архитектура**: API → Services → Models
-- **Валидация данных**: использование Pydantic моделей
-- **Обработка ошибок**: кастомные исключения
-- **Логирование**: централизованное логирование
-- **Тестирование**: unit и integration тесты
-- **Контейнеризация**: Docker для развертывания
-
-## Docker сервисы
-
-- **app**: FastAPI приложение
-- **postgres**: PostgreSQL база данных
-- **redis**: Redis кэш
-- **nginx**: Nginx прокси сервер
-- **pgadmin**: Веб-интерфейс для управления PostgreSQL (только в dev)
-
-## Устранение проблем
-
-### Проблемы с правами доступа
-
-```bash
-# Исправить права доступа к файлам
-make fix-permissions
-
-# Или вручную
-sudo chown -R $USER:$USER uploads/
-sudo chown -R $USER:$USER ./
-```
-
-### Проблемы с Docker
-
-```bash
-# Очистить все контейнеры и образы
-make clean
-
-# Перезапустить Docker
-sudo systemctl restart docker
-
-# Проверить статус Docker
-sudo systemctl status docker
-```
-
-### Настройка алиаса для удобства
-
-```bash
-# Добавить алиас dcp='sudo docker-compose'
-make setup-alias
-source ~/.bashrc
-
-# Теперь можно использовать
-dcp up -d
-dcp logs -f app
-```
