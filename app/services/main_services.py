@@ -1,4 +1,6 @@
 import logging
+import json
+from enum import Enum
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +14,13 @@ from app.db.session import async_session
 
 logger = logging.getLogger(__name__)
 
+
+class EnumEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Enum):
+            return obj.name
+        return json.JSONEncoder.default(self, obj)
+    
 
 async def create_default_admin(db: AsyncSession) -> Optional[User]:
     """

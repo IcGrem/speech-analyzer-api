@@ -17,7 +17,7 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(data: dict) -> str:
+async def create_access_token(data: dict) -> str:
     """Создание access токена"""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -26,7 +26,7 @@ def create_access_token(data: dict) -> str:
     return encoded_jwt
 
 
-def create_refresh_token(data: dict) -> str:
+async def create_refresh_token(data: dict) -> str:
     """Создание refresh токена"""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)

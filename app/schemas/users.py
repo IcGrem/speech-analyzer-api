@@ -13,7 +13,7 @@ class UserRole(str, enum.Enum):
 
 class TokenData(BaseModel):
     """Схема для токена"""
-    scopes: List[str] = Field(..., description="Сферы действия токена")
+    scopes: List[str] | str = Field(..., description="Сферы действия токена")
     username: str = Field(..., description="Имя пользователя")
 
 

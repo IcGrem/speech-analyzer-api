@@ -1,4 +1,6 @@
 from typing import List
+from datetime import timedelta
+import json
 from uuid import UUID
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Response, Security
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,8 @@ from app.schemas.users import UserResponse, UserCreate, UserUpdate
 from app.services.dependencies import get_current_user
 from app.core.exceptions import InvalidCredentialsError, UserNotFoundError
 from app.core.security import verify_password, create_access_token
+from app.services.main_services import EnumEncoder
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -26,7 +30,12 @@ async def login(
         raise UserNotFoundError()
     if not verify_password(form_data.password, user.hashed_password):
         raise InvalidCredentialsError()
-    access_token = create_access_token(data={"sub": user.username})
+    # access_token_expires = timedelta(days=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = await create_access_token(
+        data={"sub": user.username, "scopes": json.dumps(user.role, cls=EnumEncoder)}
+        )
+    
+    # access_token = create_access_token(data={"sub": user.username})
     response.set_cookie(
         key="Authorization",
         value=f"Bearer {access_token}",

@@ -56,13 +56,14 @@ log = LoggerMixin()
 async def get_current_user(
         security_scopes: SecurityScopes,
         token: str = Depends(security),
-        session: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 
 ):
     if security_scopes.scopes:
         authenticate_value = f'Bearer scope="{security_scopes.scope_str}"'
     else:
         authenticate_value = f"Bearer"
+    log.logger.debug(f'GET CURRENT USER ---> token: {token}')
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -70,17 +71,20 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(token, str(settings.SECRET_KEY), algorithms=["HS256"])
+        log.logger.debug(f'GET CURRENT USER ---> payload: {payload}')
         username: str = payload.get("sub")
-
+        log.logger.debug(f'GET CURRENT USER ---> username: {username}')
         if username is None:
+            log.logger.error(f'GET CURRENT USER ---> username is None')
             raise credentials_exception
         token_scopes = payload.get("scopes", '')
         token_data = TokenData(scopes=token_scopes, username=username)
-    except (JWTError, ValidationError):
+    except (JWTError, ValidationError) as e:
+        log.logger.error(f'GET CURRENT USER ---> JWTError, ValidationError: {e}')
         raise credentials_exception
 
-    user = await user_crud.get_by_username(session=session, username=token_data.username)
-
+    user = await user_crud.get_by_username(db=db, username=token_data.username)
+    log.logger.info(f'GET CURRENT USER ---> user: {user.username}')
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -92,7 +96,7 @@ async def get_current_user(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
         )
     in_scope = any(x in token_data.scopes for x in security_scopes.scopes)
-    log.info(f'GET CURRENT USER ---> token_data.scopes: {token_data.scopes} | security_scopes.scopes: {security_scopes.scopes}')
+    log.logger.info(f'GET CURRENT USER ---> token_data.scopes: {token_data.scopes} | security_scopes.scopes: {security_scopes.scopes}')
     if not in_scope:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
