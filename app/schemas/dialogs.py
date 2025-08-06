@@ -128,3 +128,19 @@ class OrganizationDailyMetrics(BaseModel):
     date: datetime
     total_dialogs: int
     average_metrics: DialogMetrics
+
+
+class AudioDownloadRequest(BaseModel):
+    """Модель запроса на загрузку аудиофайлов"""
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+class AudioDownloadResponse(BaseModel):
+    """Модель ответа на загрузку аудиофайлов"""
+    success: bool
+    message: str
+    downloaded_count: int
+    total_found: int
+    period: str
+    download_time: float

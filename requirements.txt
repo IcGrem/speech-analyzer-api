@@ -12,8 +12,8 @@ redis>=5.0.1
 asyncpg
 psycopg2-binary
 httpx==0.25.2
-aiohttp>=3.8.0
-aiofiles>=23.0.0
+aiohttp
+aiofiles
 pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0

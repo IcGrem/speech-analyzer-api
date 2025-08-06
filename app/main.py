@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.api.v1.router import api_router
 from app.core.logging import setup_logging, get_logger
 from app.services.main_services import ensure_admin_exists
+from app.services.scheduler_service import scheduler_service
 
 
 @asynccontextmanager
@@ -15,6 +16,7 @@ async def lifespan(app: FastAPI):
     # Startup
     setup_logging()
     logger = get_logger(__name__)
+    
     # Создание администратора по умолчанию при запуске
     try:
         async for db in get_db():
@@ -23,9 +25,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Ошибка при создании администратора: {e}")
     
+    # Запуск планировщика почасовой загрузки записей
+    try:
+        if settings.ENABLE_HOURLY_DOWNLOAD:
+            scheduler_service.start()
+            logger.info("Планировщик почасовой загрузки записей запущен")
+        else:
+            logger.info("Планировщик почасовой загрузки записей отключен в настройках")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске планировщика: {e}")
+    
     yield
+    
     # Shutdown
-    # Здесь можно добавить cleanup логику
+    # Остановка планировщика
+    try:
+        scheduler_service.stop()
+        logger.info("Планировщик почасовой загрузки записей остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка при остановке планировщика: {e}")
 
 
 def create_application() -> FastAPI:

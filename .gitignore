@@ -159,6 +159,9 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
+# Cursor
+.cursor/
+
 # Pyre type checker
 .pyre/
 
@@ -206,6 +209,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Cursor
-.cursor/
+
 instruments/
+speech_data/

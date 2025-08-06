@@ -3,6 +3,7 @@ from uuid import UUID
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Security, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.crud.dialogs import dialog_crud
@@ -14,13 +15,87 @@ from app.schemas.dialogs import (
     DialogList,
     DialogWithEmployee,
     EmployeeMetrics,
-    OrganizationDailyMetrics
+    OrganizationDailyMetrics,
+    AudioDownloadRequest,
+    AudioDownloadResponse
 )
 from app.schemas.users import UserResponse
 from app.services.dependencies import get_current_user
+from app.services.dialog_service import voca_service
 from app.core.exceptions import DialogNotFoundError
+from app.core.logging import get_logger
 
 router = APIRouter()
+logger = get_logger(__name__)
+
+
+@router.post("/get-audiodata-from-voca", response_model=AudioDownloadResponse, description="Конкурентная загрузка аудиофайлов за указанный период")
+async def get_audiodata_from_voca(
+    request: AudioDownloadRequest,
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator'])
+) -> AudioDownloadResponse:
+    """
+    Конкурентная загрузка аудиофайлов из Voca API за указанный период
+    
+    Args:
+        request: Параметры загрузки (даты и количество одновременных запросов)
+        current_user: Текущий пользователь
+    
+    Returns:
+        Результат загрузки с количеством загруженных файлов
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        logger.info(f"Запуск загрузки аудиофайлов пользователем {current_user.username}")
+        
+        # Определяем период загрузки
+        if request.start_date and request.end_date:
+            # Используем переданные даты
+            start_dt = datetime.strptime(request.start_date, "%Y-%m-%d %H:%M")
+            end_dt = datetime.strptime(request.end_date, "%Y-%m-%d %H:%M")
+            period_str = f"{request.start_date} - {request.end_date}"
+        else:
+            # Используем предыдущий час
+            start_dt = None
+            end_dt = None
+            period_str = "предыдущий час"
+        
+        # Запускаем загрузку записей
+        downloaded_records = await voca_service.download_records(
+            start_date=start_dt,
+            end_date=end_dt
+        )
+        
+        download_time = time.time() - start_time
+        
+        # Формируем ответ
+        response = AudioDownloadResponse(
+            success=True,
+            message=f"Успешно загружено {len(downloaded_records)} аудиофайлов за период {period_str} (с соблюдением ограничений API: 30 запросов/мин)",
+            downloaded_count=len(downloaded_records),
+            total_found=len(downloaded_records),  # В данном случае совпадает, так как API возвращает только доступные записи
+            period=period_str,
+            download_time=round(download_time, 2)
+        )
+        
+        logger.info(f"Загрузка завершена: {response.downloaded_count} файлов за {response.download_time}с")
+        
+        return response
+        
+    except ValueError as e:
+        logger.error(f"Ошибка в формате даты: {e}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Неверный формат даты. Используйте формат 'YYYY-MM-DD HH:MM': {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке аудиофайлов: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Ошибка при загрузке аудиофайлов: {str(e)}"
+        )
 
 
 @router.get("/get-dialogs", response_model=List[DialogList], description="Получение списка всех диалогов")

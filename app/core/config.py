@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # Voca.tech API
     VOCA_API_KEY: str = Field(env="VOCA_API_KEY")
     
+    # Планировщик
+    ENABLE_HOURLY_DOWNLOAD: bool = Field(default=False, env="ENABLE_HOURLY_DOWNLOAD")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
