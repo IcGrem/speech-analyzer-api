@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     ADMIN_FIRST_NAME: str = Field(default="Администратор", env="ADMIN_FIRST_NAME")
     ADMIN_LAST_NAME: str = Field(default="Системы", env="ADMIN_LAST_NAME")
     
+    # Voca.tech API
+    VOCA_API_KEY: str = Field(env="VOCA_API_KEY")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
