@@ -14,8 +14,10 @@ from app.core.exceptions import InvalidCredentialsError, UserNotFoundError
 from app.core.security import verify_password, create_access_token
 from app.services.main_services import EnumEncoder
 from app.core.config import settings
+from app.core.logging import get_logger
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.post("/login", response_model=UserResponse, description="Авторизация пользователя")
@@ -36,6 +38,8 @@ async def login(
         )
     
     # access_token = create_access_token(data={"sub": user.username})
+    logger.info(f"COOKIE_SECURE: {settings.COOKIE_SECURE}")
+    logger.info(f"COOKIE_SAMESITE: {settings.COOKIE_SAMESITE}")
     response.set_cookie(
         key="Authorization",
         value=f"Bearer {access_token}",
@@ -43,8 +47,10 @@ async def login(
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE
     )
-    return user
-
+    return {
+        "user": user,
+        "access_token": f"Bearer {access_token}"
+    }
 
 @router.post("/logout")
 async def logout(response: Response):
