@@ -54,6 +54,14 @@ class UserResponse(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UserResponseWithToken(BaseModel):
+    """Схема ответа для пользователя с токеном"""
+    user: UserResponse
+    access_token: str = Field(..., description="Токен пользователя")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
 class OrganizationBase(BaseModel):
     """Базовая схема для организации"""
     name: str = Field(..., min_length=1, max_length=200, description="Название организации")

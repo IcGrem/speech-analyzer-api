@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from app.db.session import get_db
 from app.crud.users import user_crud
-from app.schemas.users import UserResponse, UserCreate, UserUpdate
+from app.schemas.users import UserResponse, UserCreate, UserUpdate, UserResponseWithToken
 from app.services.dependencies import get_current_user
 from app.core.exceptions import InvalidCredentialsError, UserNotFoundError
 from app.core.security import verify_password, create_access_token
@@ -20,7 +20,7 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-@router.post("/login", response_model=UserResponse, description="Авторизация пользователя")
+@router.post("/login", response_model=UserResponseWithToken, description="Авторизация пользователя")
 async def login(
     response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
