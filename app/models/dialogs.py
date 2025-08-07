@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import ForeignKey, Enum, String, Float
+from sqlalchemy import ForeignKey, Enum, String, Float, DateTime
 from uuid import UUID
 from typing import Any
 
@@ -22,8 +22,8 @@ class Dialog(Base):
     conversation_type: Mapped[ConversationType] = mapped_column(Enum(ConversationType), nullable=False, default=ConversationType.UNKNOWN)
     conversation: Mapped[str] = mapped_column(String, nullable=False)  # JSON поле для хранения разговора
     filename: Mapped[str] = mapped_column(nullable=False)  # Наименование файла
-    recording_start_date: Mapped[datetime] = mapped_column(nullable=False)  # Дата начала записи
-    recording_end_date: Mapped[datetime] = mapped_column(nullable=False)  # Дата окончания записи
+    recording_start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)  # Дата начала записи
+    recording_end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)  # Дата окончания записи
     
     # Метрики диалога
     greeting_farewell_score: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)  # Приветствие и прощание

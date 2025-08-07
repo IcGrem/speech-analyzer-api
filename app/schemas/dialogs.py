@@ -16,7 +16,7 @@ class ConversationType(str, enum.Enum):
 
 class DialogBase(BaseModel):
     """Базовая схема для диалога"""
-    employee_id: int = Field(..., description="ID сотрудника")
+    employee_id: UUID = Field(..., description="ID сотрудника")
     conversation_type: ConversationType = Field(ConversationType.UNKNOWN, description="Тип разговора")
     conversation: Dict[str, Any] = Field(..., description="JSON структура разговора")
     filename: str = Field(..., min_length=1, max_length=500, description="Наименование файла")
@@ -42,7 +42,7 @@ class DialogCreate(DialogBase):
 
 class DialogUpdate(BaseModel):
     """Схема для обновления диалога"""
-    employee_id: Optional[int] = Field(None, description="ID сотрудника")
+    employee_id: Optional[UUID] = Field(None, description="ID сотрудника")
     conversation_type: Optional[ConversationType] = Field(None, description="Тип разговора")
     conversation: Optional[Dict[str, Any]] = Field(None, description="JSON структура разговора")
     filename: Optional[str] = Field(None, min_length=1, max_length=500, description="Наименование файла")
@@ -63,7 +63,7 @@ class DialogUpdate(BaseModel):
 
 class DialogResponse(DialogBase):
     """Схема ответа для диалога"""
-    id: int
+    id: UUID
     created_at: datetime
     updated_at: datetime
     
@@ -79,8 +79,8 @@ class DialogWithEmployee(DialogResponse):
 
 class DialogList(BaseModel):
     """Схема для списка диалогов"""
-    id: int
-    employee_id: int
+    id: UUID
+    employee_id: UUID
     conversation_type: ConversationType
     filename: str
     recording_start_date: datetime

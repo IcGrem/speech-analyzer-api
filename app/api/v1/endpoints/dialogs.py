@@ -180,7 +180,7 @@ async def get_dialogs_by_date_range(
 
 @router.get("/get-employee-metrics/{organization_id}", response_model=List[EmployeeMetrics], description="Получение метрик сотрудников организации")
 async def get_employee_metrics(
-    organization_id: int,
+    organization_id: UUID,
     start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
     end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
@@ -216,7 +216,7 @@ async def get_employee_metrics(
 
 @router.get("/get-organization-daily-metrics/{organization_id}", response_model=List[OrganizationDailyMetrics], description="Получение дневных метрик организации")
 async def get_organization_daily_metrics(
-    organization_id: int,
+    organization_id: UUID,
     start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
     end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
