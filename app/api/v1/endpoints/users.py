@@ -43,7 +43,7 @@ async def login(
     response.set_cookie(
         key="Authorization",
         value=f"Bearer {access_token}",
-        httponly=True,
+        httponly=False,
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE
     )
