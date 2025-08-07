@@ -9,13 +9,15 @@ from app.core.logging import setup_logging, get_logger
 from app.services.main_services import ensure_admin_exists
 from app.services.scheduler_service import scheduler_service
 
+setup_logging()
+logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения"""
     # Startup
-    setup_logging()
-    logger = get_logger(__name__)
+    # setup_logging()
+    # logger = get_logger(__name__)
     
     # Создание администратора по умолчанию при запуске
     try:
@@ -56,6 +58,7 @@ def create_application() -> FastAPI:
     )
 
     # CORS middleware
+    logger.info(f"ALLOWED_HOSTS: {settings.ALLOWED_HOSTS}")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.ALLOWED_HOSTS,

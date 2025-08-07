@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     
     # CORS
     ALLOWED_HOSTS: List[str] = Field(default=["*"], env="ALLOWED_HOSTS")
+    COOKIE_SAMESITE: str = Field(default="lax", env="COOKIE_SAMESITE")
+    COOKIE_SECURE: bool = Field(default=False, env="COOKIE_SECURE")
     
     # База данных
     POSTGRES_USER: str = Field(env="POSTGRES_USER")
