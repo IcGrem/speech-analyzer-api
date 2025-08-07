@@ -114,7 +114,7 @@ async def create_dialog(
     db: AsyncSession = Depends(get_db)
 ) -> DialogResponse:
     """Создание нового диалога"""
-    return await dialog_crud.create(db, obj_in=dialog)
+    return await dialog_crud.create(db, dialog)
 
 
 @router.get("/get-dialog/{dialog_id}", response_model=DialogWithEmployee, description="Получение диалога по ID")
@@ -138,7 +138,7 @@ async def update_dialog(
     db: AsyncSession = Depends(get_db)
 ) -> DialogResponse:
     """Обновление диалога"""
-    dialog_obj = await dialog_crud.update(db, dialog_id, obj_in=dialog)
+    dialog_obj = await dialog_crud.update(db, dialog_id, dialog)
     if not dialog_obj:
         raise DialogNotFoundError()
     return dialog_obj

@@ -1,6 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, or_
 
 from app.crud.base import CRUDBase
 from app.models.users import User, Organization, Employee, UserRole
@@ -49,6 +50,19 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
     async def activate_user(self, db: AsyncSession, user_id: UUID) -> Optional[User]:
         """Активировать пользователя"""
         return await self.update_by_field(db, "id", user_id, {"is_active": True})
+    
+    async def search_by_name(self, db: AsyncSession, name_part: str) -> List[User]:
+        """Поиск пользователей по имени"""
+        from sqlalchemy import or_
+        query = select(self.model).where(
+            or_(
+                self.model.first_name.ilike(f'%{name_part}%'),
+                self.model.last_name.ilike(f'%{name_part}%'),
+                self.model.username.ilike(f'%{name_part}%')
+            )
+        )
+        result = await db.execute(query)
+        return result.scalars().all()
 
 
 class CRUDOrganization(CRUDBase[Organization, OrganizationCreate, OrganizationUpdate]):
@@ -82,7 +96,7 @@ class CRUDEmployee(CRUDBase[Employee, EmployeeCreate, EmployeeUpdate]):
         """Получить сотрудника по телефону"""
         return await self.get_by_field(db, "phone", phone)
     
-    async def get_by_organization(self, db: AsyncSession, organization_id: int) -> List[Employee]:
+    async def get_by_organization(self, db: AsyncSession, organization_id: UUID) -> List[Employee]:
         """Получить всех сотрудников организации"""
         return await self.get_multi(db, organization_id=organization_id)
     
@@ -96,11 +110,14 @@ class CRUDEmployee(CRUDBase[Employee, EmployeeCreate, EmployeeUpdate]):
     
     async def search_by_name(self, db: AsyncSession, name_part: str) -> List[Employee]:
         """Поиск сотрудников по части имени"""
-        return await self.get_multi(
-            db, 
-            first_name__icontains=name_part,
-            last_name__icontains=name_part
+        query = select(self.model).where(
+            or_(
+                self.model.first_name.ilike(f'%{name_part}%'),
+                self.model.last_name.ilike(f'%{name_part}%')
+            )
         )
+        result = await db.execute(query)
+        return result.scalars().all()
     
     async def deactivate_employee(self, db: AsyncSession, employee_id: UUID) -> Optional[Employee]:
         """Деактивировать сотрудника"""

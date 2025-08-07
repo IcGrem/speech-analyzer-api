@@ -89,12 +89,12 @@ class OrganizationResponse(OrganizationBase):
 class EmployeeBase(BaseModel):
     """Базовая схема для сотрудника"""
     first_name: str = Field(..., min_length=1, max_length=100, description="Имя сотрудника")
-    last_name: str = Field(..., min_length=1, max_length=100, description="Фамилия сотрудника")
+    last_name: str = Field(None, min_length=1, max_length=100, description="Фамилия сотрудника")
     middle_name: Optional[str] = Field(None, description="Отчество сотрудника")
     position: Optional[str] = Field(None, description="Должность сотрудника")
     phone: Optional[str] = Field(None, description="Телефон сотрудника")
     email: Optional[str] = Field(None, description="Email сотрудника")
-    organization_id: int = Field(..., description="ID организации")
+    organization_id: UUID = Field(..., description="ID организации")
 
 
 class EmployeeCreate(EmployeeBase):
@@ -110,7 +110,7 @@ class EmployeeUpdate(BaseModel):
     position: Optional[str] = Field(None, description="Должность сотрудника")
     phone: Optional[str] = Field(None, description="Телефон сотрудника")
     email: Optional[str] = Field(None, description="Email сотрудника")
-    organization_id: Optional[int] = Field(None, description="ID организации")
+    organization_id: Optional[UUID] = Field(None, description="ID организации")
     is_active: Optional[bool] = Field(None, description="Активен ли сотрудник")
 
 
@@ -134,5 +134,4 @@ class EmployeeList(BaseModel):
     is_active: bool
     organization: OrganizationResponse
     
-    class Config:
-        from_attributes = True 
+    model_config = ConfigDict(from_attributes=True) 

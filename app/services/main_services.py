@@ -60,7 +60,7 @@ async def create_default_admin(db: AsyncSession) -> Optional[User]:
         )
         
         # Создаем пользователя
-        admin_user = await user_crud.create(db, obj_in=admin_data)
+        admin_user = await user_crud.create(db, admin_data)
         
         logger.info(f"Создан администратор по умолчанию: {admin_user.username}")
         return admin_user

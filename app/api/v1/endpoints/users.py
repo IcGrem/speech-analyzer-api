@@ -41,7 +41,7 @@ async def login(
         value=f"Bearer {access_token}",
         httponly=True,
         secure=False,
-        samesite="strict"
+        samesite="lax"
     )
     return user
 
@@ -77,7 +77,7 @@ async def create_user(
     db: AsyncSession = Depends(get_db)
 ) -> UserResponse:
     """Создание нового пользователя"""
-    return await user_crud.create(db, obj_in=user)
+    return await user_crud.create(db, user)
 
 
 @router.put("/update-user/{user_id}", response_model=UserResponse, description="Обновление информации о пользователе")
@@ -88,7 +88,7 @@ async def update_user(
     db: AsyncSession = Depends(get_db)
 ) -> UserResponse:
     """Обновление информации о пользователе"""
-    return await user_crud.update(db, user_id, obj_in=user)
+    return await user_crud.update(db, user_id, user)
 
 
 @router.delete("/delete-user/{user_id}", response_model=UserResponse, description="Удаление пользователя")

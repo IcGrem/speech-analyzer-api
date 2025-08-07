@@ -1,6 +1,6 @@
 from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, func
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
@@ -31,10 +31,15 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         result = await db.execute(query)
         return result.scalar_one_or_none()
     
+    async def get_all(self, db: AsyncSession) -> List[ModelType]:
+        """Получить все объекты"""
+        query = select(self.model)
+        result = await db.execute(query)
+        return result.scalars().all()
+    
     async def get_multi(
         self, 
         db: AsyncSession, 
-        *, 
         skip: int = 0, 
         limit: int = 100,
         order_by: Optional[str] = None,
@@ -46,7 +51,13 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         # Применяем фильтры
         for field, value in filters.items():
             if hasattr(self.model, field) and value is not None:
-                query = query.where(getattr(self.model, field) == value)
+                if field.endswith('__icontains'):
+                    # Поддержка поиска по подстроке
+                    actual_field = field.replace('__icontains', '')
+                    if hasattr(self.model, actual_field):
+                        query = query.where(getattr(self.model, actual_field).ilike(f'%{value}%'))
+                else:
+                    query = query.where(getattr(self.model, field) == value)
         
         # Применяем сортировку
         if order_by:
@@ -62,7 +73,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         result = await db.execute(query)
         return result.scalars().all()
     
-    async def create(self, db: AsyncSession, *, obj_in: CreateSchemaType) -> ModelType:
+    async def create(self, db: AsyncSession, obj_in: CreateSchemaType) -> ModelType:
         """Создать новый объект"""
         obj_data = obj_in.model_dump()
         db_obj = self.model(**obj_data)
@@ -74,11 +85,14 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     async def update(
         self,
         db: AsyncSession,
-        *,
-        db_obj: ModelType,
+        id: Any,
         obj_in: Union[UpdateSchemaType, Dict[str, Any]]
-    ) -> ModelType:
-        """Обновить объект"""
+    ) -> Optional[ModelType]:
+        """Обновить объект по ID"""
+        db_obj = await self.get(db, id)
+        if not db_obj:
+            return None
+        
         if isinstance(obj_in, dict):
             update_data = obj_in
         else:
@@ -93,7 +107,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         await db.refresh(db_obj)
         return db_obj
     
-    async def remove(self, db: AsyncSession, *, id: Any) -> Optional[ModelType]:
+    async def remove(self, db: AsyncSession, id: Any) -> Optional[ModelType]:
         """Удалить объект по ID"""
         obj = await self.get(db, id)
         if obj:
@@ -109,7 +123,6 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     
     async def count(self, db: AsyncSession, **filters) -> int:
         """Подсчитать количество объектов с фильтрацией"""
-        from sqlalchemy import func
         query = select(func.count(self.model.id))
         
         for field, value in filters.items():
@@ -143,5 +156,31 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         """Обновить объект по произвольному полю"""
         obj = await self.get_by_field(db, field, value)
         if obj:
-            return await self.update(db, db_obj=obj, obj_in=update_data)
-        return None 
+            # Обновляем объект напрямую
+            for field_name, field_value in update_data.items():
+                if hasattr(obj, field_name):
+                    setattr(obj, field_name, field_value)
+            
+            db.add(obj)
+            await db.commit()
+            await db.refresh(obj)
+            return obj
+        return None
+    
+    async def search_by_name(self, db: AsyncSession, name_part: str) -> List[ModelType]:
+        """Поиск по имени (базовая реализация)"""
+        # Ищем поля, которые могут содержать имя
+        name_fields = ['name', 'first_name', 'last_name', 'username']
+        query = select(self.model)
+        
+        conditions = []
+        for field in name_fields:
+            if hasattr(self.model, field):
+                conditions.append(getattr(self.model, field).ilike(f'%{name_part}%'))
+        
+        if conditions:
+            from sqlalchemy import or_
+            query = query.where(or_(*conditions))
+        
+        result = await db.execute(query)
+        return result.scalars().all() 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import ForeignKey, Enum
 from app.db.base_class import Base
 import enum
+import uuid
 
 
 class UserRole(str, enum.Enum):
@@ -41,12 +42,12 @@ class Employee(Base):
     __tablename__ = "employees"
     
     first_name: Mapped[str] = mapped_column(nullable=False)
-    last_name: Mapped[str] = mapped_column(nullable=False)
+    last_name: Mapped[str] = mapped_column(nullable=True)
     middle_name: Mapped[str] = mapped_column(nullable=True)
     position: Mapped[str] = mapped_column(nullable=True)
     phone: Mapped[str] = mapped_column(nullable=True)
     email: Mapped[str] = mapped_column(nullable=True)
-    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True)
     
     # Связи

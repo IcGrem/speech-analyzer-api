@@ -45,7 +45,7 @@ class AnalysisService(LoggerMixin):
                 status="pending"
             )
             
-            analysis = await analysis_crud.create(self.db, obj_in=analysis_data)
+            analysis = await analysis_crud.create(self.db, analysis_data)
             
             # Запускаем обработку в фоне
             await self._process_analysis_background(analysis.id, file_path)
@@ -88,7 +88,7 @@ class AnalysisService(LoggerMixin):
             os.remove(analysis.file_path)
         
         # Удаляем запись из БД через CRUD
-        await analysis_crud.remove(self.db, id=analysis_id)
+        await analysis_crud.remove(self.db, analysis_id)
     
     async def _process_analysis_background(self, analysis_id: UUID, file_path: str) -> None:
         """Обработка анализа в фоновом режиме"""
