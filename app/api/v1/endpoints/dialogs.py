@@ -265,7 +265,8 @@ async def get_employee_metrics(
     for employee_id, employee_info in employee_data.items():
         data = []
         for date_str in sorted_dates:
-            data.append(employee_info["data"].get(date_str, 0.0))
+            value = employee_info["data"].get(date_str, 0.0)
+            data.append(round(value, 2))
         
         dataset = ChartDataset(
             label=employee_info["name"],
@@ -382,7 +383,8 @@ async def get_organization_daily_metrics(
     for metric_type, metric_info in metric_data.items():
         data = []
         for date_str in sorted_dates:
-            data.append(metric_info["data"].get(date_str, 0.0))
+            value = metric_info["data"].get(date_str, 0.0)
+            data.append(round(value, 2))
         
         dataset = ChartDataset(
             label=metric_info["name"],
