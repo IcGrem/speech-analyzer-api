@@ -296,6 +296,94 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         result = await db.execute(query)
         return result.fetchall()
 
+    async def get_organization_daily_metrics_chart(
+        self, 
+        db: AsyncSession, 
+        organization_id: UUID,
+        metric_types: List[str],
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[Dict[str, Any]]:
+        """Получить метрики организации по дням для построения графика с фильтрацией по метрикам"""
+        from app.models.users import Employee
+        
+        # Строим запрос с выбранными метриками
+        select_fields = [
+            func.date(Dialog.recording_start_date).label("date")
+        ]
+        
+        for metric_type in metric_types:
+            metric_column = getattr(Dialog, metric_type)
+            select_fields.append(func.avg(metric_column).label(f"avg_{metric_type}"))
+        
+        query = select(*select_fields).join(Employee, Dialog.employee_id == Employee.id).where(
+            Employee.organization_id == organization_id
+        )
+        
+        # Фильтр по датам
+        if start_date:
+            query = query.where(Dialog.recording_start_date >= start_date)
+        if end_date:
+            query = query.where(Dialog.recording_start_date <= end_date)
+            
+        query = query.group_by(func.date(Dialog.recording_start_date))
+        query = query.order_by(func.date(Dialog.recording_start_date))
+        
+        result = await db.execute(query)
+        rows = result.fetchall()
+        
+        # Логируем для отладки
+        from app.core.logging import get_logger
+        logger = get_logger(__name__)
+        logger.info(f"SQL запрос вернул {len(rows)} строк для метрик {metric_types}")
+        for row in rows:
+            logger.info(f"Дата: {row.date}, метрики: {[getattr(row, f'avg_{metric}') for metric in metric_types]}")
+        
+        return rows
+
+    async def get_employee_metrics_by_days(
+        self, 
+        db: AsyncSession, 
+        organization_id: UUID,
+        metric_type: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        employee_ids: Optional[List[UUID]] = None
+    ) -> List[Dict[str, Any]]:
+        """Получить метрики сотрудников по дням для построения графика"""
+        from app.models.users import Employee
+        
+        # Выбираем нужную метрику
+        metric_column = getattr(Dialog, metric_type)
+        
+        query = select(
+            Employee.id,
+            Employee.first_name,
+            Employee.last_name,
+            func.date(Dialog.recording_start_date).label("date"),
+            func.avg(metric_column).label("avg_metric")
+        ).join(Employee, Dialog.employee_id == Employee.id).where(
+            Employee.organization_id == organization_id
+        )
+        
+        # Фильтр по датам
+        if start_date:
+            adjusted_start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(Dialog.recording_start_date >= adjusted_start_date)
+        if end_date:
+            adjusted_end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            query = query.where(Dialog.recording_end_date <= adjusted_end_date)
+        
+        # Фильтр по сотрудникам
+        if employee_ids:
+            query = query.where(Employee.id.in_(employee_ids))
+            
+        query = query.group_by(Employee.id, Employee.first_name, Employee.last_name, func.date(Dialog.recording_start_date))
+        query = query.order_by(Employee.first_name, Employee.last_name, func.date(Dialog.recording_start_date))
+        
+        result = await db.execute(query)
+        return result.fetchall()
+
 
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog) 

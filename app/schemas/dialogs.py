@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from uuid import UUID
 
 from app.schemas.users import EmployeeResponse
@@ -12,6 +12,18 @@ class ConversationType(str, enum.Enum):
     M2M = "m2m"  # manager to manager
     M2C = "m2c"  # manager to customer
     UNKNOWN = "unknown"
+
+
+class MetricType(str, enum.Enum):
+    GREETING_FAREWELL = "greeting_farewell_score"
+    COMPLETENESS = "completeness_score"
+    TONE = "tone_score"
+    OPENNESS_HELPFULNESS = "openness_helpfulness_score"
+    LISTENING = "listening_score"
+    EMPATHY = "empathy_score"
+    SPEECH_QUALITY = "speech_quality_score"
+    RESPONSE_TIME = "response_time_score"
+    OVERALL = "overall_score"
 
 
 class DialogBase(BaseModel):
@@ -144,3 +156,25 @@ class AudioDownloadResponse(BaseModel):
     total_found: int
     period: str
     download_time: float
+
+
+
+
+
+class ChartDataset(BaseModel):
+    """Схема для набора данных графика"""
+    label: str
+    data: List[float]
+    backgroundColor: str
+
+
+class EmployeeMetricsChartResponse(BaseModel):
+    """Схема ответа для метрик сотрудников в формате Chart.js"""
+    labels: List[str]
+    datasets: List[ChartDataset]
+
+
+class OrganizationDailyMetricsChartResponse(BaseModel):
+    """Схема ответа для дневных метрик организации в формате Chart.js"""
+    labels: List[str]
+    datasets: List[ChartDataset]
