@@ -1,9 +1,10 @@
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Security, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+import random
 
 from app.db.session import get_db
 from app.crud.dialogs import dialog_crud
@@ -17,7 +18,11 @@ from app.schemas.dialogs import (
     EmployeeMetrics,
     OrganizationDailyMetrics,
     AudioDownloadRequest,
-    AudioDownloadResponse
+    AudioDownloadResponse,
+    EmployeeMetricsChartResponse,
+    OrganizationDailyMetricsChartResponse,
+    ChartDataset,
+    MetricType
 )
 from app.schemas.users import UserResponse
 from app.services.dependencies import get_current_user
@@ -178,51 +183,229 @@ async def get_dialogs_by_date_range(
     return await dialog_crud.get_by_date_range(db, start_date, end_date)
 
 
-@router.get("/get-employee-metrics/{organization_id}", response_model=List[EmployeeMetrics], description="Получение метрик сотрудников организации")
+@router.get("/get-employee-metrics/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Получение метрик сотрудников организации в формате графика")
 async def get_employee_metrics(
     organization_id: UUID,
+    metric_type: MetricType = Query(..., description="Тип метрики для анализа"),
+    employee_ids: Optional[str] = Query(None, description="Список ID сотрудников через запятую"),
     start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
     end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
     db: AsyncSession = Depends(get_db)
-) -> List[EmployeeMetrics]:
-    """Получение метрик сотрудников организации с разбивкой по сотрудникам и фильтром по датам"""
-    metrics_data = await dialog_crud.get_employee_metrics_by_organization(
-        db, organization_id, start_date, end_date
+) -> EmployeeMetricsChartResponse:
+    """Получение метрик сотрудников организации в формате Chart.js с фильтрацией по метрикам и сотрудникам"""
+    
+    # Логика работы с датами: если start_date и end_date совпадают, добавляем предыдущий день
+    adjusted_start_date = start_date
+    adjusted_end_date = end_date
+    
+    if start_date and end_date and start_date.date() == end_date.date():
+        # Если даты совпадают, добавляем предыдущий день
+        adjusted_start_date = start_date - timedelta(days=1)
+    elif start_date:
+        # Если передана только start_date, используем её как есть
+        adjusted_start_date = start_date
+    else:
+        # Если даты не переданы, используем None
+        adjusted_start_date = None
+        adjusted_end_date = None
+    
+    # Парсим employee_ids из строки
+    parsed_employee_ids = None
+    if employee_ids:
+        try:
+            parsed_employee_ids = [UUID(emp_id.strip()) for emp_id in employee_ids.split(',')]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат ID сотрудников")
+    
+    # Получаем данные метрик по дням
+    metrics_data = await dialog_crud.get_employee_metrics_by_days(
+        db, 
+        organization_id, 
+        metric_type.value,
+        adjusted_start_date, 
+        adjusted_end_date,
+        parsed_employee_ids
     )
     
-    result = []
-    for row in metrics_data:
-        employee_metrics = EmployeeMetrics(
-            employee_id=row.id,
-            employee_name=f"{row.first_name} {row.last_name}",
-            metrics={
-                "greeting_farewell_score": float(row.avg_greeting_farewell or 0.0),
-                "completeness_score": float(row.avg_completeness or 0.0),
-                "tone_score": float(row.avg_tone or 0.0),
-                "openness_helpfulness_score": float(row.avg_openness_helpfulness or 0.0),
-                "listening_score": float(row.avg_listening or 0.0),
-                "empathy_score": float(row.avg_empathy or 0.0),
-                "speech_quality_score": float(row.avg_speech_quality or 0.0),
-                "response_time_score": float(row.avg_response_time or 0.0),
-                "overall_score": float(row.avg_overall or 0.0)
-            },
-            dialog_count=row.dialog_count
-        )
-        result.append(employee_metrics)
+    # Генерируем случайные цвета для каждого сотрудника
+    colors = [
+        "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
+        "#f43f5e", "#ef4444", "#f97316", "#f59e0b", "#eab308",
+        "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
+        "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6", "#a855f7"
+    ]
     
-    return result
+    # Группируем данные по сотрудникам
+    employee_data = {}
+    all_dates = set()
+    
+    for row in metrics_data:
+        employee_id = row.id
+        employee_name = f"{row.first_name} {row.last_name}"
+        date_str = row.date.strftime("%d-%m-%Y")
+        metric_value = float(row.avg_metric or 0.0)
+        
+        all_dates.add(date_str)
+        
+        if employee_id not in employee_data:
+            employee_data[employee_id] = {
+                "name": employee_name,
+                "color": random.choice(colors),
+                "data": {}
+            }
+        
+        employee_data[employee_id]["data"][date_str] = metric_value
+    
+    # Сортируем даты
+    sorted_dates = sorted(all_dates, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
+    
+    # Формируем datasets
+    datasets = []
+    for employee_id, employee_info in employee_data.items():
+        data = []
+        for date_str in sorted_dates:
+            data.append(employee_info["data"].get(date_str, 0.0))
+        
+        dataset = ChartDataset(
+            label=employee_info["name"],
+            data=data,
+            backgroundColor=employee_info["color"]
+        )
+        datasets.append(dataset)
+    
+    return EmployeeMetricsChartResponse(
+        labels=sorted_dates,
+        datasets=datasets
+    )
 
 
-@router.get("/get-organization-daily-metrics/{organization_id}", response_model=List[OrganizationDailyMetrics], description="Получение дневных метрик организации")
+@router.get("/get-organization-daily-metrics/{organization_id}", response_model=OrganizationDailyMetricsChartResponse, description="Получение дневных метрик организации в формате графика")
 async def get_organization_daily_metrics(
+    organization_id: UUID,
+    metric_types: str = Query(..., description="Список метрик через запятую (greeting_farewell_score,completeness_score,tone_score,openness_helpfulness_score,listening_score,empathy_score,speech_quality_score,response_time_score,overall_score)"),
+    start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
+    end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> OrganizationDailyMetricsChartResponse:
+    """Получение дневных метрик организации в формате Chart.js с фильтрацией по метрикам"""
+    
+    # Парсим список метрик
+    try:
+        parsed_metric_types = [metric.strip() for metric in metric_types.split(',')]
+        # Валидируем метрики
+        valid_metrics = {
+            "greeting_farewell_score", "completeness_score", "tone_score", 
+            "openness_helpfulness_score", "listening_score", "empathy_score", 
+            "speech_quality_score", "response_time_score", "overall_score"
+        }
+        for metric in parsed_metric_types:
+            if metric not in valid_metrics:
+                raise HTTPException(status_code=400, detail=f"Неверная метрика: {metric}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Неверный формат списка метрик: {str(e)}")
+    
+    # Логика работы с датами
+    adjusted_start_date = start_date
+    adjusted_end_date = end_date
+    
+    if start_date and end_date and start_date.date() == end_date.date():
+        # Если даты совпадают, добавляем предыдущий день
+        adjusted_start_date = start_date - timedelta(days=1)
+    elif start_date and not end_date:
+        # Если передана только start_date, добавляем предыдущий день
+        adjusted_start_date = start_date - timedelta(days=1)
+    elif not start_date and end_date:
+        # Если передана только end_date, добавляем предыдущий день
+        adjusted_end_date = end_date - timedelta(days=1)
+    
+    # Устанавливаем время для корректной фильтрации
+    if adjusted_start_date:
+        adjusted_start_date = adjusted_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    if adjusted_end_date:
+        adjusted_end_date = adjusted_end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    # Получаем данные метрик по дням
+    logger.info(f"Запрос метрик: org_id={organization_id}, metrics={parsed_metric_types}, start={adjusted_start_date}, end={adjusted_end_date}")
+    metrics_data = await dialog_crud.get_organization_daily_metrics_chart(
+        db, organization_id, parsed_metric_types, adjusted_start_date, adjusted_end_date
+    )
+    logger.info(f"Получено {len(metrics_data)} записей метрик")
+    
+    # Словарь для преобразования названий метрик
+    metrics_names = {
+        "greeting_farewell_score": "Приветствие и прощание",
+        "completeness_score": "Полнота ответа",
+        "tone_score": "Тон общения",
+        "openness_helpfulness_score": "Открытость и готовность помочь",
+        "listening_score": "Умение слушать",
+        "empathy_score": "Эмпатия",
+        "speech_quality_score": "Грамотная речь",
+        "response_time_score": "Время ответа",
+        "overall_score": "Итоговая оценка"
+    }
+    
+    # Генерируем случайные цвета для каждой метрики
+    colors = [
+        "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
+        "#f43f5e", "#ef4444", "#f97316", "#f59e0b", "#eab308",
+        "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
+        "#0ea5e9", "#3b82f6", "#ccc6f1", "#8b5cf6", "#a855f7"
+    ]
+    
+    # Группируем данные по метрикам
+    metric_data = {}
+    all_dates = set()
+    
+    for row in metrics_data:
+        date_str = row.date.strftime("%d-%m-%Y")
+        all_dates.add(date_str)
+        
+        for metric_type in parsed_metric_types:
+            if metric_type not in metric_data:
+                metric_data[metric_type] = {
+                    "name": metrics_names[metric_type],
+                    "color": random.choice(colors),
+                    "data": {}
+                }
+            
+            # Получаем значение метрики
+            metric_value = float(getattr(row, f"avg_{metric_type}") or 0.0)
+            metric_data[metric_type]["data"][date_str] = metric_value
+    
+    # Сортируем даты
+    sorted_dates = sorted(all_dates, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
+    
+    # Формируем datasets
+    datasets = []
+    for metric_type, metric_info in metric_data.items():
+        data = []
+        for date_str in sorted_dates:
+            data.append(metric_info["data"].get(date_str, 0.0))
+        
+        dataset = ChartDataset(
+            label=metric_info["name"],
+            data=data,
+            backgroundColor=metric_info["color"]
+        )
+        datasets.append(dataset)
+    
+    return OrganizationDailyMetricsChartResponse(
+        labels=sorted_dates,
+        datasets=datasets
+    )
+
+
+@router.get("/get-organization-daily-metrics-old/{organization_id}", response_model=List[OrganizationDailyMetrics], description="Получение дневных метрик организации (старый формат)")
+async def get_organization_daily_metrics_old(
     organization_id: UUID,
     start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
     end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
     db: AsyncSession = Depends(get_db)
 ) -> List[OrganizationDailyMetrics]:
-    """Получение суммарных метрик организации по дням с фильтром по датам"""
+    """Получение суммарных метрик организации по дням с фильтром по датам (старый формат)"""
     metrics_data = await dialog_crud.get_organization_daily_metrics(
         db, organization_id, start_date, end_date
     )
