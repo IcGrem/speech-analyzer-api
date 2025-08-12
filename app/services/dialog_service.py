@@ -6,9 +6,15 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import aiohttp
 import aiofiles
+from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
 
 from app.core.config import settings
 from app.core.logging import LoggerMixin
+from app.crud.audio_data import audio_data_crud, audio_data_for_analysis_crud
+from app.crud.users import employee_crud
+from app.schemas.users import EmployeeCreate
+
 
 
 class VocaAPIService(LoggerMixin):
@@ -110,10 +116,95 @@ class VocaAPIService(LoggerMixin):
         async with aiofiles.open(json_path, 'w', encoding='utf-8') as f:
             await f.write(json.dumps(record, ensure_ascii=False, indent=2))
     
+    def _parse_employee_name(self, employee_name: str) -> tuple[str, Optional[str]]:
+        """Парсит полное имя сотрудника на имя и фамилию"""
+        name_parts = employee_name.strip().split()
+        if len(name_parts) >= 2:
+            first_name = name_parts[0]
+            last_name = name_parts[-1]
+        elif len(name_parts) == 1:
+            first_name = name_parts[0]
+            last_name = None
+        else:
+            first_name = "Неизвестно"
+            last_name = None
+        
+        return first_name, last_name
+    
+    async def _ensure_employee_exists(
+        self, 
+        db: AsyncSession, 
+        record: Dict[str, Any]
+    ) -> bool:
+        """Проверяет существование сотрудника и создает запись если нужно"""
+        try:
+            employee_id = record['employeeId']
+            
+            # Проверяем, существует ли уже сотрудник
+            existing_employee = await employee_crud.get_by_employee_id(db, employee_id)
+            if existing_employee:
+                self.logger.info(f"Сотрудник с ID {employee_id} уже существует в базе данных")
+                return True
+            
+            # Парсим имя сотрудника
+            first_name, last_name = self._parse_employee_name(record['employeeName'])
+            
+            # Создаем запись сотрудника
+           
+            employee_data = EmployeeCreate(
+                employee_id=employee_id,
+                first_name=first_name,
+                last_name=last_name,
+                position=record['employeePosition'],
+                organization_id=UUID(settings.DEFAULT_ORGANIZATION_ID),
+                is_active=True
+            )
+            
+            await employee_crud.create(db, employee_data)
+            self.logger.info(f"Создана запись сотрудника: {first_name} {last_name} (ID: {employee_id})")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при создании записи сотрудника: {e}")
+            return False
+    
+    async def _save_record_to_database(
+        self, 
+        db: AsyncSession, 
+        record: Dict[str, Any], 
+        audio_path: Path
+    ) -> bool:
+        """Сохраняет информацию о записи в базу данных"""
+        try:
+            # Проверяем, не существует ли уже запись с таким audio_data_id
+            existing_record = await audio_data_crud.get_by_audio_data_id(db, record['id'])
+            if existing_record:
+                self.logger.info(f"Запись с ID {record['id']} уже существует в базе данных")
+                return True
+            
+            # Убеждаемся, что сотрудник существует в базе данных
+            employee_created = await self._ensure_employee_exists(db, record)
+            if not employee_created:
+                self.logger.warning(f"Не удалось создать запись сотрудника для записи {record['id']}")
+            
+            # Создаем относительный путь к файлу для сохранения в БД
+            relative_filename = str(audio_path.relative_to(self.speech_data_path))
+            
+            # Создаем запись в базе данных
+            await audio_data_crud.create_from_voca_record(db, record, relative_filename)
+            
+            self.logger.info(f"Запись {record['id']} сохранена в базу данных")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при сохранении записи {record['id']} в базу данных: {e}")
+            return False
+    
     async def download_records(
         self, 
         start_date: Optional[datetime] = None, 
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
+        db: Optional[AsyncSession] = None
     ) -> List[Dict[str, Any]]:
         """
         Загружает записи за указанный период
@@ -162,6 +253,12 @@ class VocaAPIService(LoggerMixin):
                     audio_path = record_path / f"{record_id}.wav"
                     await self._download_audio(record_id, audio_path)
                     
+                    # Сохраняем запись в базу данных, если передан объект БД
+                    if db:
+                        db_saved = await self._save_record_to_database(db, record, audio_path)
+                        if not db_saved:
+                            self.logger.warning(f"Не удалось сохранить запись {record_id} в базу данных")
+                    
                     downloaded_records.append(record)
                     self.logger.info(f"Загружена запись {record_id} ({i}/{len(records)}): {record['employeeName']} - {record['durationSec']}с")
                     
@@ -179,7 +276,8 @@ class VocaAPIService(LoggerMixin):
     async def download_records_by_date_range(
         self, 
         start_date: str, 
-        end_date: str
+        end_date: str,
+        db: Optional[AsyncSession] = None
     ) -> List[Dict[str, Any]]:
         """
         Загружает записи по строковым датам
@@ -194,11 +292,283 @@ class VocaAPIService(LoggerMixin):
         try:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
             end_dt = datetime.strptime(end_date, "%Y-%m-%d %H:%M")
-            return await self.download_records(start_dt, end_dt)
+            return await self.download_records(start_dt, end_dt, db)
         except ValueError as e:
             self.logger.error(f"Ошибка в формате даты: {e}")
             return []
+    
+    async def get_audio_data_stats(self, db: AsyncSession) -> Dict[str, Any]:
+        """Получить статистику по аудиозаписям"""
+        try:
+            total_count = await audio_data_crud.get_total_count(db)
+            processed_count = await audio_data_crud.get_processed_count(db)
+            unprocessed_count = await audio_data_crud.get_unprocessed_count(db)
+            
+            processed_percentage = (processed_count / total_count * 100) if total_count > 0 else 0
+            
+            return {
+                "total_count": total_count,
+                "processed_count": processed_count,
+                "unprocessed_count": unprocessed_count,
+                "processed_percentage": round(processed_percentage, 2)
+            }
+        except Exception as e:
+            self.logger.error(f"Ошибка при получении статистики: {e}")
+            return {
+                "total_count": 0,
+                "processed_count": 0,
+                "unprocessed_count": 0,
+                "processed_percentage": 0.0
+            }
+    
+    async def get_unprocessed_audio_data(self, db: AsyncSession, limit: int = 100) -> List[Dict[str, Any]]:
+        """Получить необработанные аудиозаписи"""
+        try:
+            records = await audio_data_crud.get_unprocessed(db, limit)
+            return [
+                {
+                    "id": record.id,
+                    "audio_data_id": record.audio_data_id,
+                    "creation_date": record.creation_date,
+                    "employee_name": record.employee_name,
+                    "duration_sec": record.duration_sec,
+                    "filename": record.filename,
+                    "is_processed": record.is_processed
+                }
+                for record in records
+            ]
+        except Exception as e:
+            self.logger.error(f"Ошибка при получении необработанных записей: {e}")
+            return []
+    
+    async def mark_audio_data_as_processed(self, db: AsyncSession, audio_data_id: int) -> bool:
+        """Отметить аудиозапись как обработанную"""
+        try:
+            result = await audio_data_crud.mark_as_processed(db, audio_data_id)
+            if result:
+                self.logger.info(f"Запись {audio_data_id} отмечена как обработанная")
+                return True
+            else:
+                self.logger.warning(f"Запись {audio_data_id} не найдена")
+                return False
+        except Exception as e:
+            self.logger.error(f"Ошибка при отметке записи {audio_data_id} как обработанной: {e}")
+            return False
 
 
 # Создаем экземпляр сервиса
 voca_service = VocaAPIService()
+
+
+class AudioDataProcessor(LoggerMixin):
+    """Класс для обработки аудиоданных перед транскрибацией и анализом"""
+    
+    def __init__(self):
+        self.full_speech_data_path = Path("full_speech_data")
+        self.speech_data_path = Path("speech_data")
+        
+        # Создаем папки если их нет
+        self.full_speech_data_path.mkdir(exist_ok=True)
+        self.speech_data_path.mkdir(exist_ok=True)
+    
+    def _get_employee_date_folder(self, employee_id: int, date: datetime) -> Path:
+        """Получить путь к папке для сотрудника и даты"""
+        date_str = date.strftime("%Y-%m-%d")
+        folder_name = f"{employee_id}_{date_str}"
+        return self.full_speech_data_path / folder_name
+    
+    def _get_full_audio_filename(self, employee_id: int, date: datetime) -> str:
+        """Получить имя файла для склеенного аудио"""
+        date_str = date.strftime("%Y-%m-%d")
+        return f"{employee_id}_{date_str}_full.wav"
+    
+    async def _concatenate_audio_files(
+        self, 
+        audio_files: List[Path], 
+        output_path: Path
+    ) -> bool:
+        """Склеить аудиофайлы в один WAV файл"""
+        try:
+            import wave
+            import numpy as np
+            
+            # Создаем папку если её нет
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Читаем первый файл для получения параметров
+            with wave.open(str(audio_files[0]), 'rb') as first_wav:
+                channels = first_wav.getnchannels()
+                sample_width = first_wav.getsampwidth()
+                frame_rate = first_wav.getframerate()
+            
+            # Собираем все аудиоданные
+            all_audio_data = []
+            for audio_file in audio_files:
+                with wave.open(str(audio_file), 'rb') as wav_file:
+                    # Проверяем совместимость параметров
+                    if (wav_file.getnchannels() != channels or 
+                        wav_file.getsampwidth() != sample_width or 
+                        wav_file.getframerate() != frame_rate):
+                        self.logger.warning(f"Пропускаем файл {audio_file} - несовместимые параметры")
+                        continue
+                    
+                    audio_data = wav_file.readframes(wav_file.getnframes())
+                    all_audio_data.append(audio_data)
+            
+            if not all_audio_data:
+                self.logger.error("Нет совместимых аудиофайлов для склеивания")
+                return False
+            
+            # Записываем склеенный файл
+            with wave.open(str(output_path), 'wb') as output_wav:
+                output_wav.setnchannels(channels)
+                output_wav.setsampwidth(sample_width)
+                output_wav.setframerate(frame_rate)
+                
+                for audio_data in all_audio_data:
+                    output_wav.writeframes(audio_data)
+            
+            self.logger.info(f"Склеен аудиофайл: {output_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при склеивании аудиофайлов: {e}")
+            return False
+    
+    async def process_employee_audio_data(
+        self, 
+        db: AsyncSession, 
+        employee_id: int, 
+        target_date: datetime
+    ) -> Optional[str]:
+        """
+        Обработать аудиоданные для конкретного сотрудника за предыдущие сутки
+        
+        Args:
+            db: Сессия базы данных
+            employee_id: ID сотрудника
+            target_date: Дата, для которой обрабатываем предыдущие сутки
+            
+        Returns:
+            Путь к склеенному файлу или None в случае ошибки
+        """
+        try:
+            # Получаем предыдущий день
+            previous_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            
+            # Получаем необработанные записи для сотрудника за предыдущий день
+            audio_records = await audio_data_crud.get_unprocessed_by_employee_and_date(
+                db, employee_id, previous_day
+            )
+            
+            if not audio_records:
+                self.logger.info(f"Нет необработанных записей для сотрудника {employee_id} за {previous_day.date()}")
+                return None
+            
+            self.logger.info(f"Найдено {len(audio_records)} записей для сотрудника {employee_id} за {previous_day.date()}")
+            
+            # Собираем пути к аудиофайлам
+            audio_files = []
+            for record in audio_records:
+                audio_file_path = self.speech_data_path / record.filename
+                if audio_file_path.exists():
+                    audio_files.append(audio_file_path)
+                else:
+                    self.logger.warning(f"Файл не найден: {audio_file_path}")
+            
+            if not audio_files:
+                self.logger.error(f"Нет доступных аудиофайлов для сотрудника {employee_id}")
+                return None
+            
+            # Создаем папку для сотрудника и даты
+            employee_folder = self._get_employee_date_folder(employee_id, previous_day)
+            employee_folder.mkdir(parents=True, exist_ok=True)
+            
+            # Формируем имя выходного файла
+            output_filename = self._get_full_audio_filename(employee_id, previous_day)
+            output_path = employee_folder / output_filename
+            
+            # Склеиваем аудиофайлы
+            success = await self._concatenate_audio_files(audio_files, output_path)
+            
+            if not success:
+                self.logger.error(f"Не удалось склеить аудиофайлы для сотрудника {employee_id}")
+                return None
+            
+            # Отмечаем записи как обработанные
+            audio_data_ids = [record.audio_data_id for record in audio_records]
+            updated_count = await audio_data_crud.mark_multiple_as_processed(db, audio_data_ids)
+            
+            if updated_count != len(audio_data_ids):
+                self.logger.warning(f"Обновлено {updated_count} из {len(audio_data_ids)} записей")
+            
+            # Создаем запись в таблице audio_data_for_analysis
+            relative_filename = str(output_path.relative_to(self.full_speech_data_path))
+            await audio_data_for_analysis_crud.create_or_update_for_employee_date(
+                db, employee_id, previous_day, relative_filename
+            )
+            
+            self.logger.info(f"Успешно обработаны аудиоданные для сотрудника {employee_id}: {relative_filename}")
+            return relative_filename
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при обработке аудиоданных для сотрудника {employee_id}: {e}")
+            return None
+    
+    async def process_all_audio_data(
+        self, 
+        db: AsyncSession, 
+        target_date: datetime = None
+    ) -> Dict[int, str]:
+        """
+        Обработать аудиоданные для всех сотрудников за предыдущие сутки
+        
+        Args:
+            db: Сессия базы данных
+            target_date: Дата, для которой обрабатываем предыдущие сутки (если None, используется текущая дата)
+            
+        Returns:
+            Словарь {employee_id: filename} с результатами обработки
+        """
+        if target_date is None:
+            target_date = datetime.now()
+        
+        try:
+            # Получаем все необработанные записи за предыдущие сутки
+            all_records = await audio_data_crud.get_unprocessed_by_previous_day(db, target_date)
+            
+            if not all_records:
+                self.logger.info(f"Нет необработанных записей за предыдущие сутки от {target_date.date()}")
+                return {}
+            
+            # Группируем записи по сотрудникам
+            employee_records = {}
+            for record in all_records:
+                if record.employee_id not in employee_records:
+                    employee_records[record.employee_id] = []
+                employee_records[record.employee_id].append(record)
+            
+            self.logger.info(f"Найдено {len(employee_records)} сотрудников с необработанными записями")
+            
+            # Обрабатываем каждого сотрудника
+            results = {}
+            for employee_id, records in employee_records.items():
+                self.logger.info(f"Обрабатываем сотрудника {employee_id} ({len(records)} записей)")
+                
+                filename = await self.process_employee_audio_data(db, employee_id, target_date)
+                if filename:
+                    results[employee_id] = filename
+                
+                # Небольшая пауза между обработкой сотрудников
+                await asyncio.sleep(0.1)
+            
+            self.logger.info(f"Обработано {len(results)} сотрудников из {len(employee_records)}")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при обработке всех аудиоданных: {e}")
+            return {}
+
+
+# Создаем экземпляр процессора аудиоданных
+audio_processor = AudioDataProcessor()

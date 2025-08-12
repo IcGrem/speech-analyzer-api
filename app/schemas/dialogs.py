@@ -178,3 +178,15 @@ class OrganizationDailyMetricsChartResponse(BaseModel):
     """Схема ответа для дневных метрик организации в формате Chart.js"""
     labels: List[str]
     datasets: List[ChartDataset]
+
+
+class AverageMetricScore(BaseModel):
+    """Схема для средней оценки метрики"""
+    title: str
+    score: float
+
+
+class OrganizationAverageMetricsResponse(BaseModel):
+    """Схема ответа для средних метрик организации"""
+    average_scores: Dict[str, AverageMetricScore]
+    graphic: OrganizationDailyMetricsChartResponse

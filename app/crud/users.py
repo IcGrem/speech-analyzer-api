@@ -149,6 +149,12 @@ class CRUDEmployee(CRUDBase[Employee, EmployeeCreate, EmployeeUpdate]):
         result = await db.execute(query)
         return result.scalar_one_or_none()
     
+    async def get_by_employee_id(self, db: AsyncSession, employee_id: int) -> Optional[Employee]:
+        """Получить сотрудника по employee_id с загрузкой организации"""
+        query = select(self.model).options(selectinload(self.model.organization)).where(self.model.employee_id == employee_id)
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+    
     async def get_by_organization(self, db: AsyncSession, organization_id: UUID) -> List[Employee]:
         """Получить всех сотрудников организации с загрузкой организаций"""
         return await self.get_multi(db, organization_id=organization_id)

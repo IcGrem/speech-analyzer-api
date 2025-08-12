@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.dialog_service import voca_service
 from app.core.logging import LoggerMixin
 
@@ -11,6 +12,11 @@ class SchedulerService(LoggerMixin):
     def __init__(self):
         self._task: Optional[asyncio.Task] = None
         self._running = False
+        self._db_session_factory = None
+    
+    def set_db_session_factory(self, session_factory):
+        """Устанавливает фабрику сессий базы данных"""
+        self._db_session_factory = session_factory
     
     async def start_hourly_download(self):
         """Запускает периодическую загрузку записей каждый час"""
@@ -39,7 +45,16 @@ class SchedulerService(LoggerMixin):
                 # Запускаем загрузку записей за предыдущий час
                 try:
                     self.logger.info("Запуск почасовой загрузки записей")
-                    await voca_service.download_records()
+                    
+                    # Создаем сессию базы данных для загрузки
+                    if self._db_session_factory:
+                        async for db in self._db_session_factory():
+                            await voca_service.download_records(db=db)
+                            break
+                    else:
+                        # Если фабрика не установлена, загружаем без сохранения в БД
+                        await voca_service.download_records()
+                    
                     self.logger.info("Почасовая загрузка записей завершена")
                 except Exception as e:
                     self.logger.error(f"Ошибка при почасовой загрузке записей: {e}")

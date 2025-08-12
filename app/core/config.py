@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # Планировщик
     ENABLE_HOURLY_DOWNLOAD: bool = Field(default=False, env="ENABLE_HOURLY_DOWNLOAD")
     
+    # Организация по умолчанию
+    DEFAULT_ORGANIZATION_ID: str = Field(default="00000000-0000-0000-0000-000000000000", env="DEFAULT_ORGANIZATION_ID")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

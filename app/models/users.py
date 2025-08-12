@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import ForeignKey, Enum
+from sqlalchemy import ForeignKey, Enum, Integer
 from app.db.base_class import Base
 import enum
 import uuid
@@ -41,6 +41,7 @@ class Organization(Base):
 class Employee(Base):
     __tablename__ = "employees"
     
+    employee_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
     first_name: Mapped[str] = mapped_column(nullable=False)
     last_name: Mapped[str] = mapped_column(nullable=True)
     middle_name: Mapped[str] = mapped_column(nullable=True)

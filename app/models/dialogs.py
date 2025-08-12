@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import ForeignKey, Enum, String, Float, DateTime
+from sqlalchemy import ForeignKey, Enum, String, Float, DateTime, Integer, Boolean
 from uuid import UUID
 from typing import Any
 
@@ -38,3 +38,37 @@ class Dialog(Base):
     
     # Связь с сотрудником
     employee: Mapped["Employee"] = relationship("Employee", backref="dialogs")
+
+
+class AudioData(Base):
+    __tablename__ = "audio_data"
+    
+    audio_data_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    creation_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    receive_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    duration_sec: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_name: Mapped[str] = mapped_column(String, nullable=False)
+    employee_position: Mapped[str] = mapped_column(String, nullable=False)
+    device_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    device_description: Mapped[str] = mapped_column(String, nullable=False)
+    unit_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_name: Mapped[str] = mapped_column(String, nullable=False)
+    unit_code: Mapped[str] = mapped_column(String, nullable=False)
+    is_expired: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    # обработано
+    is_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class AudioDataForAnalysis(Base):
+    __tablename__ = "audio_data_for_analysis"
+
+    employee_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    full_audio_filename: Mapped[str] = mapped_column(String, nullable=True)
+    is_analyzed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    transcribed_text: Mapped[str] = mapped_column(String, nullable=True)

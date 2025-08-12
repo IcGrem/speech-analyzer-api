@@ -96,8 +96,9 @@ class OrganizationResponse(OrganizationBase):
 
 class EmployeeBase(BaseModel):
     """Базовая схема для сотрудника"""
+    employee_id: int = Field(..., description="ID сотрудника")
     first_name: str = Field(..., min_length=1, max_length=100, description="Имя сотрудника")
-    last_name: str = Field(None, min_length=1, max_length=100, description="Фамилия сотрудника")
+    last_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Фамилия сотрудника")
     middle_name: Optional[str] = Field(None, description="Отчество сотрудника")
     position: Optional[str] = Field(None, description="Должность сотрудника")
     phone: Optional[str] = Field(None, description="Телефон сотрудника")
@@ -112,6 +113,7 @@ class EmployeeCreate(EmployeeBase):
 
 class EmployeeUpdate(BaseModel):
     """Схема для обновления сотрудника"""
+    employee_id: Optional[int] = Field(None, description="ID сотрудника")
     first_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Имя сотрудника")
     last_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Фамилия сотрудника")
     middle_name: Optional[str] = Field(None, description="Отчество сотрудника")
@@ -136,6 +138,7 @@ class EmployeeResponse(EmployeeBase):
 class EmployeeList(BaseModel):
     """Схема для списка сотрудников"""
     id: UUID
+    employee_id: int
     first_name: str
     last_name: str
     position: Optional[str] = None

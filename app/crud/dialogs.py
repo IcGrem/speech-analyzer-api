@@ -384,6 +384,58 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         result = await db.execute(query)
         return result.fetchall()
 
+    async def get_organization_average_metrics(
+        self, 
+        db: AsyncSession, 
+        organization_id: UUID,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Получить средние метрики организации по всем диалогам"""
+        from app.models.users import Employee
+
+        query = select(
+            func.avg(Dialog.greeting_farewell_score).label("avg_greeting_farewell"),
+            func.avg(Dialog.completeness_score).label("avg_completeness"),
+            func.avg(Dialog.tone_score).label("avg_tone"),
+            func.avg(Dialog.openness_helpfulness_score).label("avg_openness_helpfulness"),
+            func.avg(Dialog.listening_score).label("avg_listening"),
+            func.avg(Dialog.empathy_score).label("avg_empathy"),
+            func.avg(Dialog.speech_quality_score).label("avg_speech_quality"),
+            func.avg(Dialog.response_time_score).label("avg_response_time"),
+            func.avg(Dialog.overall_score).label("avg_overall")
+        ).join(Employee, Dialog.employee_id == Employee.id).where(
+            Employee.organization_id == organization_id
+        )
+        
+        # Фильтр по датам
+        if start_date:
+            adjusted_start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(Dialog.recording_start_date >= adjusted_start_date)
+        if end_date:
+            adjusted_end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            query = query.where(Dialog.recording_start_date <= adjusted_end_date)
+       
+        result = await db.execute(query)
+        row = result.fetchone()
+
+        if not row:
+            return {}
+        
+        result_dict = {
+            "avg_greeting_farewell_score": float(row.avg_greeting_farewell or 0.0),
+            "avg_completeness_score": float(row.avg_completeness or 0.0),
+            "avg_tone_score": float(row.avg_tone or 0.0),
+            "avg_openness_helpfulness_score": float(row.avg_openness_helpfulness or 0.0),
+            "avg_listening_score": float(row.avg_listening or 0.0),
+            "avg_empathy_score": float(row.avg_empathy or 0.0),
+            "avg_speech_quality_score": float(row.avg_speech_quality or 0.0),
+            "avg_response_time_score": float(row.avg_response_time or 0.0),
+            "avg_overall_score": float(row.avg_overall or 0.0)
+        }
+        
+        return result_dict
+
 
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog) 

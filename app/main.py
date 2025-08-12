@@ -30,6 +30,8 @@ async def lifespan(app: FastAPI):
     # Запуск планировщика почасовой загрузки записей
     try:
         if settings.ENABLE_HOURLY_DOWNLOAD:
+            # Устанавливаем фабрику сессий базы данных в планировщик
+            scheduler_service.set_db_session_factory(get_db)
             scheduler_service.start()
             logger.info("Планировщик почасовой загрузки записей запущен")
         else:

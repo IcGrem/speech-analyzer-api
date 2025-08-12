@@ -8,6 +8,7 @@ import random
 
 from app.db.session import get_db
 from app.crud.dialogs import dialog_crud
+from app.crud.audio_data import audio_data_crud
 from app.models.dialogs import ConversationType
 from app.schemas.dialogs import (
     DialogResponse, 
@@ -22,11 +23,14 @@ from app.schemas.dialogs import (
     EmployeeMetricsChartResponse,
     OrganizationDailyMetricsChartResponse,
     ChartDataset,
-    MetricType
+    MetricType,
+    OrganizationAverageMetricsResponse,
+    AverageMetricScore
 )
+from app.schemas.audio_data import AudioDataList, AudioDataStats
 from app.schemas.users import UserResponse
 from app.services.dependencies import get_current_user
-from app.services.dialog_service import voca_service
+from app.services.dialog_service import voca_service, audio_processor
 from app.core.exceptions import DialogNotFoundError
 from app.core.logging import get_logger
 
@@ -37,7 +41,8 @@ logger = get_logger(__name__)
 @router.post("/get-audiodata-from-voca", response_model=AudioDownloadResponse, description="Конкурентная загрузка аудиофайлов за указанный период")
 async def get_audiodata_from_voca(
     request: AudioDownloadRequest,
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator'])
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
 ) -> AudioDownloadResponse:
     """
     Конкурентная загрузка аудиофайлов из Voca API за указанный период
@@ -70,7 +75,8 @@ async def get_audiodata_from_voca(
         # Запускаем загрузку записей
         downloaded_records = await voca_service.download_records(
             start_date=start_dt,
-            end_date=end_dt
+            end_date=end_dt,
+            db=db
         )
         
         download_time = time.time() - start_time
@@ -334,26 +340,49 @@ async def get_organization_daily_metrics(
     )
     logger.info(f"Получено {len(metrics_data)} записей метрик")
     
-    # Словарь для преобразования названий метрик
-    metrics_names = {
-        "greeting_farewell_score": "Приветствие и прощание",
-        "completeness_score": "Полнота ответа",
-        "tone_score": "Тон общения",
-        "openness_helpfulness_score": "Открытость и готовность помочь",
-        "listening_score": "Умение слушать",
-        "empathy_score": "Эмпатия",
-        "speech_quality_score": "Грамотная речь",
-        "response_time_score": "Время ответа",
-        "overall_score": "Итоговая оценка"
+    # Словарь для преобразования названий метрик и их цвета
+    metrics_names_and_colors = {
+        "greeting_farewell_score": {
+            "title": "Приветствие и прощание",
+            "color": "#0004FFFF"
+        },
+        "completeness_score": {
+            "title": "Полнота ответа",
+            "color": "#5D1FF0FF"
+        },
+        "tone_score": {
+            "title": "Тон общения",
+            "color": "#F12EE8FF"
+        },
+        "openness_helpfulness_score": {
+            "title": "Открытость и готовность помочь",
+            "color": "#39F180FF"
+        },
+        "listening_score": {
+            "title": "Умение слушать",
+            "color": "#FBFF2BFF"
+        },
+        "speech_quality_score": {
+            "title": "Грамотная речь",
+            "color": "#2EE4F1FF"
+        },
+        "response_time_score": {
+            "title": "Время ответа",
+            "color": "#C75F5FFF"
+        },
+        "overall_score": {
+            "title": "Итоговая оценка",
+            "color": "#FF1313FF"
+        }
     }
     
     # Генерируем случайные цвета для каждой метрики
-    colors = [
-        "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
-        "#f43f5e", "#ef4444", "#f97316", "#f59e0b", "#eab308",
-        "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
-        "#0ea5e9", "#3b82f6", "#ccc6f1", "#8b5cf6", "#a855f7"
-    ]
+    # colors = [
+    #     "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
+    #     "#f43f5e", "#ef4444", "#f97316", "#f59e0b", "#eab308",
+    #     "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
+    #     "#0ea5e9", "#3b82f6", "#ccc6f1", "#8b5cf6", "#a855f7"
+    # ]
     
     # Группируем данные по метрикам
     metric_data = {}
@@ -366,8 +395,8 @@ async def get_organization_daily_metrics(
         for metric_type in parsed_metric_types:
             if metric_type not in metric_data:
                 metric_data[metric_type] = {
-                    "name": metrics_names[metric_type],
-                    "color": random.choice(colors),
+                    "name": metrics_names_and_colors[metric_type]["title"],
+                    "color": metrics_names_and_colors[metric_type]["color"],
                     "data": {}
                 }
             
@@ -434,6 +463,151 @@ async def get_organization_daily_metrics_old(
     return result
 
 
+@router.get("/get-organization-average-metrics/{organization_id}", response_model=OrganizationAverageMetricsResponse, description="Получение средних метрик организации")
+async def get_organization_average_metrics(
+    organization_id: UUID,
+    start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
+    end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> OrganizationAverageMetricsResponse:
+    """Получение средних метрик организации по всем диалогам с фильтром по датам"""
+    
+    # Словарь для преобразования названий метрик и их цвета
+    metrics_names_and_colors = {
+        "greeting_farewell_score": {
+            "title": "Приветствие и прощание",
+            "color": "#0004FFFF"
+        },
+        "completeness_score": {
+            "title": "Полнота ответа",
+            "color": "#5D1FF0FF"
+        },
+        "tone_score": {
+            "title": "Тон общения",
+            "color": "#F12EE8FF"
+        },
+        "openness_helpfulness_score": {
+            "title": "Открытость и готовность помочь",
+            "color": "#39F180FF"
+        },
+        "listening_score": {
+            "title": "Умение слушать",
+            "color": "#FBFF2BFF"
+        },
+        "empathy_score": {
+            "title": "Эмпатия",
+            "color": "#FF6B35FF"
+        },
+        "speech_quality_score": {
+            "title": "Грамотная речь",
+            "color": "#2EE4F1FF"
+        },
+        "response_time_score": {
+            "title": "Время ответа",
+            "color": "#C75F5FFF"
+        },
+        "overall_score": {
+            "title": "Итоговая оценка",
+            "color": "#FF1313FF"
+        }
+    }
+    
+    # Получаем средние метрики
+    logger.info(f"Запрос средних метрик для организации {organization_id}, start_date={start_date}, end_date={end_date}")
+    average_metrics = await dialog_crud.get_organization_average_metrics(
+        db, organization_id, start_date, end_date
+    )
+    
+    logger.info(f"Получены средние метрики из CRUD: {average_metrics}")
+    
+    # Формируем average_scores
+    average_scores = {}
+    logger.info(f"Ключи в average_metrics: {list(average_metrics.keys())}")
+    for metric_key, metric_info in metrics_names_and_colors.items():
+        avg_key = f"avg_{metric_key}"
+        avg_value = average_metrics.get(avg_key, 0.0)
+        logger.info(f"Метрика {metric_key} (ключ {avg_key}): avg_value={avg_value}")
+        average_scores[metric_key] = AverageMetricScore(
+            title=metric_info["title"],
+            score=round(avg_value, 2)
+        )
+    
+    # Получаем данные для графика (используем все метрики)
+    all_metric_types = list(metrics_names_and_colors.keys())
+    
+    # Логика работы с датами для графика
+    adjusted_start_date = start_date
+    adjusted_end_date = end_date
+    
+    if start_date and end_date and start_date.date() == end_date.date():
+        adjusted_start_date = start_date - timedelta(days=1)
+    elif start_date and not end_date:
+        adjusted_start_date = start_date - timedelta(days=1)
+    elif not start_date and end_date:
+        adjusted_end_date = end_date - timedelta(days=1)
+    
+    # Устанавливаем время для корректной фильтрации
+    if adjusted_start_date:
+        adjusted_start_date = adjusted_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    if adjusted_end_date:
+        adjusted_end_date = adjusted_end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    # Получаем данные метрик по дням для графика
+    metrics_data = await dialog_crud.get_organization_daily_metrics_chart(
+        db, organization_id, all_metric_types, adjusted_start_date, adjusted_end_date
+    )
+    
+    # Группируем данные по метрикам
+    metric_data = {}
+    all_dates = set()
+    
+    for row in metrics_data:
+        date_str = row.date.strftime("%d-%m-%Y")
+        all_dates.add(date_str)
+        
+        for metric_type in all_metric_types:
+            if metric_type not in metric_data:
+                metric_data[metric_type] = {
+                    "name": metrics_names_and_colors[metric_type]["title"],
+                    "color": metrics_names_and_colors[metric_type]["color"],
+                    "data": {}
+                }
+            
+            # Получаем значение метрики
+            metric_value = float(getattr(row, f"avg_{metric_type}") or 0.0)
+            metric_data[metric_type]["data"][date_str] = metric_value
+    
+    # Сортируем даты
+    sorted_dates = sorted(all_dates, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
+    
+    # Формируем datasets для графика
+    datasets = []
+    for metric_type, metric_info in metric_data.items():
+        data = []
+        for date_str in sorted_dates:
+            value = metric_info["data"].get(date_str, 0.0)
+            data.append(round(value, 2))
+        
+        dataset = ChartDataset(
+            label=metric_info["name"],
+            data=data,
+            backgroundColor=metric_info["color"]
+        )
+        datasets.append(dataset)
+    
+    # Формируем график
+    graphic = OrganizationDailyMetricsChartResponse(
+        labels=sorted_dates,
+        datasets=datasets
+    )
+    
+    return OrganizationAverageMetricsResponse(
+        average_scores=average_scores,
+        graphic=graphic
+    )
+
+
 @router.get("/get-dialogs-by-type/{conversation_type}", response_model=List[DialogList], description="Получение диалогов по типу разговора")
 async def get_dialogs_by_type(
     conversation_type: str,
@@ -467,3 +641,112 @@ async def get_recent_dialogs(
 ) -> List[DialogList]:
     """Получение диалогов за последние N дней"""
     return await dialog_crud.get_recent_dialogs(db, days)
+
+
+# Эндпоинты для работы с AudioData
+
+@router.get("/audio-data/stats", response_model=AudioDataStats, description="Получение статистики по аудиозаписям")
+async def get_audio_data_stats(
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> AudioDataStats:
+    """Получение статистики по аудиозаписям"""
+    try:
+        stats = await voca_service.get_audio_data_stats(db)
+        return AudioDataStats(**stats)
+    except Exception as e:
+        logger.error(f"Ошибка при получении статистики аудиозаписей: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении статистики: {str(e)}"
+        )
+
+
+@router.get("/audio-data/unprocessed", response_model=List[AudioDataList], description="Получение необработанных аудиозаписей")
+async def get_unprocessed_audio_data(
+    limit: int = Query(100, description="Максимальное количество записей"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> List[AudioDataList]:
+    """Получение необработанных аудиозаписей"""
+    try:
+        records = await voca_service.get_unprocessed_audio_data(db, limit)
+        return [AudioDataList(**record) for record in records]
+    except Exception as e:
+        logger.error(f"Ошибка при получении необработанных аудиозаписей: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении необработанных записей: {str(e)}"
+        )
+
+
+@router.post("/audio-data/{audio_data_id}/mark-processed", description="Отметить аудиозапись как обработанную")
+async def mark_audio_data_as_processed(
+    audio_data_id: int,
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+):
+    """Отметить аудиозапись как обработанную"""
+    try:
+        success = await voca_service.mark_audio_data_as_processed(db, audio_data_id)
+        if success:
+            return {"message": f"Запись {audio_data_id} отмечена как обработанная"}
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Запись {audio_data_id} не найдена"
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при отметке записи {audio_data_id} как обработанной: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при отметке записи как обработанной: {str(e)}"
+        )
+
+
+@router.post("/audio-data/process-previous-day", description="Обработать аудиоданные за предыдущие сутки")
+async def process_audio_data_previous_day(
+    target_date: Optional[datetime] = Query(None, description="Дата, для которой обрабатываем предыдущие сутки (если не указана, используется текущая дата)"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Обработать аудиоданные за предыдущие сутки перед транскрибацией и анализом
+    
+    - Получает необработанные записи из таблицы audio_data за предыдущие сутки
+    - Склеивает аудиофайлы для каждого сотрудника в хронологическом порядке
+    - Сохраняет склеенные файлы в папку full_speech_data/{employee_id}_{дата}/
+    - Отмечает записи как обработанные (is_processed = True)
+    - Создает записи в таблице audio_data_for_analysis
+    """
+    try:
+        logger.info(f"Запуск обработки аудиоданных пользователем {current_user.username}")
+        
+        # Обрабатываем аудиоданные
+        results = await audio_processor.process_all_audio_data(db, target_date)
+        
+        if results:
+            processed_count = len(results)
+            logger.info(f"Успешно обработано {processed_count} сотрудников")
+            
+            return {
+                "success": True,
+                "message": f"Обработано {processed_count} сотрудников",
+                "processed_count": processed_count,
+                "results": results
+            }
+        else:
+            logger.info("Нет данных для обработки")
+            return {
+                "success": True,
+                "message": "Нет данных для обработки",
+                "processed_count": 0,
+                "results": {}
+            }
+            
+    except Exception as e:
+        logger.error(f"Ошибка при обработке аудиоданных: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при обработке аудиоданных: {str(e)}"
+        )
