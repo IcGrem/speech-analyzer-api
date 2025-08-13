@@ -362,6 +362,10 @@ async def get_organization_daily_metrics(
             "title": "Умение слушать",
             "color": "#FBFF2BFF"
         },
+        "empathy_score": {
+            "title": "Эмпатия",
+            "color": "#FF6B35FF"
+        },
         "speech_quality_score": {
             "title": "Грамотная речь",
             "color": "#2EE4F1FF"
