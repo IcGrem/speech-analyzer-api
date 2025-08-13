@@ -41,7 +41,7 @@ class Organization(Base):
 class Employee(Base):
     __tablename__ = "employees"
     
-    employee_id: Mapped[int] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    employee_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
     first_name: Mapped[str] = mapped_column(nullable=False)
     last_name: Mapped[str] = mapped_column(nullable=True)
     middle_name: Mapped[str] = mapped_column(nullable=True)
