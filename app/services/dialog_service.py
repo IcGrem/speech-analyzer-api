@@ -8,6 +8,15 @@ import aiohttp
 import aiofiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
+from pydub import AudioSegment
+
+# Устанавливаем пути к ffmpeg для pydub
+import os
+os.environ["PATH"] = "C:\\Program Files\\ffmpeg\\bin;" + os.environ.get("PATH", "")
+
+AudioSegment.converter = "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe"
+AudioSegment.ffmpeg = "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe"
+AudioSegment.ffprobe = "C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe"
 
 from app.core.config import settings
 from app.core.logging import LoggerMixin
@@ -37,8 +46,10 @@ class VocaAPIService(LoggerMixin):
         # Создаем папку speech_data если её нет
         self.speech_data_path.mkdir(exist_ok=True)
     
-    async def _rate_limited_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> Any:
+    async def _rate_limited_request(self, url: str, params: Optional[Dict[str, Any]] = None, retry_count: int = 0) -> Any:
         """Выполняет HTTP запрос с соблюдением rate limiting"""
+        max_retries = 5  # Максимальное количество попыток
+        
         async with self.rate_limit_semaphore:
             # Ждем минимальный интервал между запросами
             current_time = asyncio.get_event_loop().time()
@@ -54,17 +65,22 @@ class VocaAPIService(LoggerMixin):
                     if response.status == 200:
                         return await response.json()
                     elif response.status == 429:
+                        if retry_count >= max_retries:
+                            raise Exception(f"Rate limit exceeded after {max_retries} retries")
+                        
                         # Rate limit exceeded - ждем дольше
                         retry_after = int(response.headers.get('Retry-After', 60))
-                        self.logger.warning(f"Rate limit exceeded. Waiting {retry_after} seconds...")
+                        self.logger.warning(f"Rate limit exceeded (attempt {retry_count + 1}/{max_retries}). Waiting {retry_after} seconds...")
                         await asyncio.sleep(retry_after)
-                        # Повторяем запрос
-                        return await self._rate_limited_request(url, params)
+                        # Повторяем запрос с увеличенным счетчиком
+                        return await self._rate_limited_request(url, params, retry_count + 1)
                     else:
                         raise Exception(f"API request failed: {response.status} - {await response.text()}")
     
-    async def _rate_limited_download(self, url: str, file_path: Path) -> None:
+    async def _rate_limited_download(self, url: str, file_path: Path, retry_count: int = 0) -> None:
         """Загружает файл с соблюдением rate limiting"""
+        max_retries = 5  # Максимальное количество попыток
+        
         async with self.rate_limit_semaphore:
             # Ждем минимальный интервал между запросами
             current_time = asyncio.get_event_loop().time()
@@ -81,12 +97,15 @@ class VocaAPIService(LoggerMixin):
                         async with aiofiles.open(file_path, 'wb') as f:
                             await f.write(await response.read())
                     elif response.status == 429:
+                        if retry_count >= max_retries:
+                            raise Exception(f"Rate limit exceeded during download after {max_retries} retries")
+                        
                         # Rate limit exceeded - ждем дольше
                         retry_after = int(response.headers.get('Retry-After', 60))
-                        self.logger.warning(f"Rate limit exceeded during download. Waiting {retry_after} seconds...")
+                        self.logger.warning(f"Rate limit exceeded during download (attempt {retry_count + 1}/{max_retries}). Waiting {retry_after} seconds...")
                         await asyncio.sleep(retry_after)
-                        # Повторяем загрузку
-                        await self._rate_limited_download(url, file_path)
+                        # Повторяем загрузку с увеличенным счетчиком
+                        await self._rate_limited_download(url, file_path, retry_count + 1)
                     else:
                         raise Exception(f"Failed to download file: {response.status}")
     
@@ -382,54 +401,114 @@ class AudioDataProcessor(LoggerMixin):
         date_str = date.strftime("%Y-%m-%d")
         return f"{employee_id}_{date_str}_full.wav"
     
+    def _get_audio_info(self, file_path: Path) -> Optional[Dict[str, Any]]:
+        """Получает информацию об аудиофайле"""
+        try:
+            audio = AudioSegment.from_file(str(file_path))
+            return {
+                'channels': audio.channels,
+                'sample_width': audio.sample_width,
+                'frame_rate': audio.frame_rate,
+                'duration_ms': len(audio)
+            }
+        except Exception as e:
+            self.logger.warning(f"Ошибка при получении информации о файле {file_path}: {e}")
+            return None
+    
     async def _concatenate_audio_files(
         self, 
         audio_files: List[Path], 
         output_path: Path
     ) -> bool:
-        """Склеить аудиофайлы в один WAV файл"""
+        """Склеить аудиофайлы в один WAV файл используя pydub"""
         try:
-            import wave
-            import numpy as np
-            
             # Создаем папку если её нет
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Читаем первый файл для получения параметров
-            with wave.open(str(audio_files[0]), 'rb') as first_wav:
-                channels = first_wav.getnchannels()
-                sample_width = first_wav.getsampwidth()
-                frame_rate = first_wav.getframerate()
-            
-            # Собираем все аудиоданные
-            all_audio_data = []
+            # Проверяем существование файлов
+            valid_files = []
             for audio_file in audio_files:
-                with wave.open(str(audio_file), 'rb') as wav_file:
-                    # Проверяем совместимость параметров
-                    if (wav_file.getnchannels() != channels or 
-                        wav_file.getsampwidth() != sample_width or 
-                        wav_file.getframerate() != frame_rate):
-                        self.logger.warning(f"Пропускаем файл {audio_file} - несовместимые параметры")
-                        continue
-                    
-                    audio_data = wav_file.readframes(wav_file.getnframes())
-                    all_audio_data.append(audio_data)
+                if not audio_file.exists():
+                    self.logger.warning(f"Файл не существует: {audio_file}")
+                    continue
+                
+                # Проверяем, что файл можно загрузить
+                audio_info = self._get_audio_info(audio_file)
+                if audio_info:
+                    valid_files.append(audio_file)
+                    self.logger.info(f"Файл {audio_file.name}: {audio_info['channels']} каналов, "
+                                   f"{audio_info['frame_rate']} Hz, {audio_info['duration_ms']}ms")
+                else:
+                    self.logger.warning(f"Не удалось загрузить файл {audio_file}")
             
-            if not all_audio_data:
-                self.logger.error("Нет совместимых аудиофайлов для склеивания")
+            if not valid_files:
+                self.logger.error("Нет валидных аудиофайлов для склеивания")
                 return False
             
-            # Записываем склеенный файл
-            with wave.open(str(output_path), 'wb') as output_wav:
-                output_wav.setnchannels(channels)
-                output_wav.setsampwidth(sample_width)
-                output_wav.setframerate(frame_rate)
-                
-                for audio_data in all_audio_data:
-                    output_wav.writeframes(audio_data)
+            self.logger.info(f"Найдено {len(valid_files)} валидных файлов из {len(audio_files)}")
             
-            self.logger.info(f"Склеен аудиофайл: {output_path}")
-            return True
+            # Загружаем первый файл для получения базовых параметров
+            try:
+                first_audio = AudioSegment.from_file(str(valid_files[0]))
+                base_channels = first_audio.channels
+                base_frame_rate = first_audio.frame_rate
+                base_sample_width = first_audio.sample_width
+            except Exception as e:
+                self.logger.error(f"Ошибка при загрузке первого файла {valid_files[0]}: {e}")
+                return False
+            
+            # Склеиваем все файлы
+            combined_audio = AudioSegment.empty()
+            
+            for audio_file in valid_files:
+                try:
+                    # Загружаем аудиофайл
+                    audio = AudioSegment.from_file(str(audio_file))
+                    
+                    # Приводим к единым параметрам если нужно
+                    if audio.channels != base_channels:
+                        if base_channels == 1:
+                            audio = audio.set_channels(1)
+                        else:
+                            audio = audio.set_channels(2)
+                    
+                    if audio.frame_rate != base_frame_rate:
+                        audio = audio.set_frame_rate(base_frame_rate)
+                    
+                    if audio.sample_width != base_sample_width:
+                        audio = audio.set_sample_width(base_sample_width)
+                    
+                    # Добавляем к общему аудио
+                    combined_audio += audio
+                    self.logger.debug(f"Добавлен файл {audio_file.name} ({len(audio)}ms)")
+                    
+                except Exception as e:
+                    self.logger.warning(f"Ошибка при обработке файла {audio_file}: {e}")
+                    continue
+            
+            if len(combined_audio) == 0:
+                self.logger.error("Не удалось склеить аудиофайлы")
+                return False
+            
+            # Экспортируем результат в WAV
+            try:
+                combined_audio.export(
+                    str(output_path),
+                    format="wav",
+                    parameters=[
+                        "-acodec", "pcm_s16le",  # 16-bit PCM
+                        "-ar", str(base_frame_rate),  # Sample rate
+                        "-ac", str(base_channels)  # Channels
+                    ]
+                )
+                
+                self.logger.info(f"Склеен аудиофайл: {output_path} "
+                               f"({len(valid_files)} файлов, {len(combined_audio)}ms)")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"Ошибка при экспорте файла {output_path}: {e}")
+                return False
             
         except Exception as e:
             self.logger.error(f"Ошибка при склеивании аудиофайлов: {e}")
@@ -455,7 +534,7 @@ class AudioDataProcessor(LoggerMixin):
         try:
             # Получаем предыдущий день
             previous_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-            
+            self.logger.info(f"previous_day: {previous_day}")
             # Получаем необработанные записи для сотрудника за предыдущий день
             audio_records = await audio_data_crud.get_unprocessed_by_employee_and_date(
                 db, employee_id, previous_day

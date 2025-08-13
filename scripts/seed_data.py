@@ -31,6 +31,7 @@ def generate_organization() -> dict:
 def generate_employee(organization_id: uuid.UUID) -> dict:
     """Генерирует данные сотрудника"""
     return {
+        "employee_id": fake.unique.random_int(min=100000, max=999999),
         "first_name": fake.first_name(),
         "last_name": fake.last_name(),
         "middle_name": fake.middle_name(),

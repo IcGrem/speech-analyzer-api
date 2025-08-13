@@ -428,41 +428,6 @@ async def get_organization_daily_metrics(
     )
 
 
-@router.get("/get-organization-daily-metrics-old/{organization_id}", response_model=List[OrganizationDailyMetrics], description="Получение дневных метрик организации (старый формат)")
-async def get_organization_daily_metrics_old(
-    organization_id: UUID,
-    start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
-    end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
-    db: AsyncSession = Depends(get_db)
-) -> List[OrganizationDailyMetrics]:
-    """Получение суммарных метрик организации по дням с фильтром по датам (старый формат)"""
-    metrics_data = await dialog_crud.get_organization_daily_metrics(
-        db, organization_id, start_date, end_date
-    )
-    
-    result = []
-    for row in metrics_data:
-        daily_metrics = OrganizationDailyMetrics(
-            date=row.date,
-            total_dialogs=row.total_dialogs,
-            average_metrics={
-                "greeting_farewell_score": float(row.avg_greeting_farewell or 0.0),
-                "completeness_score": float(row.avg_completeness or 0.0),
-                "tone_score": float(row.avg_tone or 0.0),
-                "openness_helpfulness_score": float(row.avg_openness_helpfulness or 0.0),
-                "listening_score": float(row.avg_listening or 0.0),
-                "empathy_score": float(row.avg_empathy or 0.0),
-                "speech_quality_score": float(row.avg_speech_quality or 0.0),
-                "response_time_score": float(row.avg_response_time or 0.0),
-                "overall_score": float(row.avg_overall or 0.0)
-            }
-        )
-        result.append(daily_metrics)
-    
-    return result
-
-
 @router.get("/get-organization-average-metrics/{organization_id}", response_model=OrganizationAverageMetricsResponse, description="Получение средних метрик организации")
 async def get_organization_average_metrics(
     organization_id: UUID,
@@ -608,39 +573,39 @@ async def get_organization_average_metrics(
     )
 
 
-@router.get("/get-dialogs-by-type/{conversation_type}", response_model=List[DialogList], description="Получение диалогов по типу разговора")
-async def get_dialogs_by_type(
-    conversation_type: str,
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
-    db: AsyncSession = Depends(get_db)
-) -> List[DialogList]:
-    """Получение диалогов по типу разговора"""
-    try:
-        conv_type = ConversationType(conversation_type)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Неверный тип разговора")
+# @router.get("/get-dialogs-by-type/{conversation_type}", response_model=List[DialogList], description="Получение диалогов по типу разговора")
+# async def get_dialogs_by_type(
+#     conversation_type: str,
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+#     db: AsyncSession = Depends(get_db)
+# ) -> List[DialogList]:
+#     """Получение диалогов по типу разговора"""
+#     try:
+#         conv_type = ConversationType(conversation_type)
+#     except ValueError:
+#         raise HTTPException(status_code=400, detail="Неверный тип разговора")
     
-    return await dialog_crud.get_by_conversation_type(db, conv_type)
+#     return await dialog_crud.get_by_conversation_type(db, conv_type)
 
 
-@router.get("/search-dialogs", response_model=List[DialogList], description="Поиск диалогов по имени файла")
-async def search_dialogs(
-    filename: str = Query(..., description="Часть имени файла для поиска"),
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
-    db: AsyncSession = Depends(get_db)
-) -> List[DialogList]:
-    """Поиск диалогов по части имени файла"""
-    return await dialog_crud.search_by_filename(db, filename)
+# @router.get("/search-dialogs", response_model=List[DialogList], description="Поиск диалогов по имени файла")
+# async def search_dialogs(
+#     filename: str = Query(..., description="Часть имени файла для поиска"),
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+#     db: AsyncSession = Depends(get_db)
+# ) -> List[DialogList]:
+#     """Поиск диалогов по части имени файла"""
+#     return await dialog_crud.search_by_filename(db, filename)
 
 
-@router.get("/get-recent-dialogs", response_model=List[DialogList], description="Получение недавних диалогов")
-async def get_recent_dialogs(
-    days: int = Query(7, description="Количество дней для поиска"),
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
-    db: AsyncSession = Depends(get_db)
-) -> List[DialogList]:
-    """Получение диалогов за последние N дней"""
-    return await dialog_crud.get_recent_dialogs(db, days)
+# @router.get("/get-recent-dialogs", response_model=List[DialogList], description="Получение недавних диалогов")
+# async def get_recent_dialogs(
+#     days: int = Query(7, description="Количество дней для поиска"),
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+#     db: AsyncSession = Depends(get_db)
+# ) -> List[DialogList]:
+#     """Получение диалогов за последние N дней"""
+#     return await dialog_crud.get_recent_dialogs(db, days)
 
 
 # Эндпоинты для работы с AudioData
@@ -662,46 +627,46 @@ async def get_audio_data_stats(
         )
 
 
-@router.get("/audio-data/unprocessed", response_model=List[AudioDataList], description="Получение необработанных аудиозаписей")
-async def get_unprocessed_audio_data(
-    limit: int = Query(100, description="Максимальное количество записей"),
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
-    db: AsyncSession = Depends(get_db)
-) -> List[AudioDataList]:
-    """Получение необработанных аудиозаписей"""
-    try:
-        records = await voca_service.get_unprocessed_audio_data(db, limit)
-        return [AudioDataList(**record) for record in records]
-    except Exception as e:
-        logger.error(f"Ошибка при получении необработанных аудиозаписей: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка при получении необработанных записей: {str(e)}"
-        )
+# @router.get("/audio-data/unprocessed", response_model=List[AudioDataList], description="Получение необработанных аудиозаписей")
+# async def get_unprocessed_audio_data(
+#     limit: int = Query(100, description="Максимальное количество записей"),
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+#     db: AsyncSession = Depends(get_db)
+# ) -> List[AudioDataList]:
+#     """Получение необработанных аудиозаписей"""
+#     try:
+#         records = await voca_service.get_unprocessed_audio_data(db, limit)
+#         return [AudioDataList(**record) for record in records]
+#     except Exception as e:
+#         logger.error(f"Ошибка при получении необработанных аудиозаписей: {e}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Ошибка при получении необработанных записей: {str(e)}"
+#         )
 
 
-@router.post("/audio-data/{audio_data_id}/mark-processed", description="Отметить аудиозапись как обработанную")
-async def mark_audio_data_as_processed(
-    audio_data_id: int,
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
-    db: AsyncSession = Depends(get_db)
-):
-    """Отметить аудиозапись как обработанную"""
-    try:
-        success = await voca_service.mark_audio_data_as_processed(db, audio_data_id)
-        if success:
-            return {"message": f"Запись {audio_data_id} отмечена как обработанная"}
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Запись {audio_data_id} не найдена"
-            )
-    except Exception as e:
-        logger.error(f"Ошибка при отметке записи {audio_data_id} как обработанной: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка при отметке записи как обработанной: {str(e)}"
-        )
+# @router.post("/audio-data/{audio_data_id}/mark-processed", description="Отметить аудиозапись как обработанную")
+# async def mark_audio_data_as_processed(
+#     audio_data_id: int,
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+#     db: AsyncSession = Depends(get_db)
+# ):
+#     """Отметить аудиозапись как обработанную"""
+#     try:
+#         success = await voca_service.mark_audio_data_as_processed(db, audio_data_id)
+#         if success:
+#             return {"message": f"Запись {audio_data_id} отмечена как обработанная"}
+#         else:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"Запись {audio_data_id} не найдена"
+#             )
+#     except Exception as e:
+#         logger.error(f"Ошибка при отметке записи {audio_data_id} как обработанной: {e}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Ошибка при отметке записи как обработанной: {str(e)}"
+#         )
 
 
 @router.post("/audio-data/process-previous-day", description="Обработать аудиоданные за предыдущие сутки")

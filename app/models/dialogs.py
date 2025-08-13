@@ -56,7 +56,7 @@ class AudioData(Base):
     device_description: Mapped[str] = mapped_column(String, nullable=False)
     unit_id: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_name: Mapped[str] = mapped_column(String, nullable=False)
-    unit_code: Mapped[str] = mapped_column(String, nullable=False)
+    unit_code: Mapped[int] = mapped_column(Integer, nullable=True)
     is_expired: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     filename: Mapped[str] = mapped_column(String, nullable=False)

@@ -101,40 +101,40 @@ async def get_employees_by_organization(
     return await employee_crud.get_by_organization(db, organization_id)
 
 
-@router.get("/get-active-employees", response_model=List[EmployeeResponse], description="Получение активных сотрудников")
-async def get_active_employees(
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
-    db: AsyncSession = Depends(get_db)
-) -> List[EmployeeResponse]:
-    """Получение активных сотрудников"""
-    return await employee_crud.get_active_employees(db)
+# @router.get("/get-active-employees", response_model=List[EmployeeResponse], description="Получение активных сотрудников")
+# async def get_active_employees(
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+#     db: AsyncSession = Depends(get_db)
+# ) -> List[EmployeeResponse]:
+#     """Получение активных сотрудников"""
+#     return await employee_crud.get_active_employees(db)
 
 
-@router.get("/get-employees-by-position", response_model=List[EmployeeResponse], description="Получение сотрудников по должности")
-async def get_employees_by_position(
-    position: str,
-    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
-    db: AsyncSession = Depends(get_db)
-) -> List[EmployeeResponse]:
-    """Получение сотрудников по должности"""
-    return await employee_crud.get_by_position(db, position)
+# @router.get("/get-employees-by-position", response_model=List[EmployeeResponse], description="Получение сотрудников по должности")
+# async def get_employees_by_position(
+#     position: str,
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+#     db: AsyncSession = Depends(get_db)
+# ) -> List[EmployeeResponse]:
+#     """Получение сотрудников по должности"""
+#     return await employee_crud.get_by_position(db, position)
 
 
-@router.put("/activate-employee/{employee_id}", response_model=EmployeeResponse, description="Активация сотрудника")
-async def activate_employee(
-    employee_id: UUID,
-    current_user: UserResponse = Security(get_current_user, scopes=['admin']),
-    db: AsyncSession = Depends(get_db)
-) -> EmployeeResponse:
-    """Активация сотрудника"""
-    return await employee_crud.activate_employee(db, employee_id)
+# @router.put("/activate-employee/{employee_id}", response_model=EmployeeResponse, description="Активация сотрудника")
+# async def activate_employee(
+#     employee_id: UUID,
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin']),
+#     db: AsyncSession = Depends(get_db)
+# ) -> EmployeeResponse:
+#     """Активация сотрудника"""
+#     return await employee_crud.activate_employee(db, employee_id)
 
 
-@router.put("/deactivate-employee/{employee_id}", response_model=EmployeeResponse, description="Деактивация сотрудника")
-async def deactivate_employee(
-    employee_id: UUID,
-    current_user: UserResponse = Security(get_current_user, scopes=['admin']),
-    db: AsyncSession = Depends(get_db)
-) -> EmployeeResponse:
-    """Деактивация сотрудника"""
-    return await employee_crud.deactivate_employee(db, employee_id) 
+# @router.put("/deactivate-employee/{employee_id}", response_model=EmployeeResponse, description="Деактивация сотрудника")
+# async def deactivate_employee(
+#     employee_id: UUID,
+#     current_user: UserResponse = Security(get_current_user, scopes=['admin']),
+#     db: AsyncSession = Depends(get_db)
+# ) -> EmployeeResponse:
+#     """Деактивация сотрудника"""
+#     return await employee_crud.deactivate_employee(db, employee_id) 

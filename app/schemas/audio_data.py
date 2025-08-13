@@ -18,7 +18,7 @@ class AudioDataBase(BaseModel):
     device_description: str
     unit_id: int
     unit_name: str
-    unit_code: str
+    unit_code: int | None
     is_expired: bool
     filename: str
     is_processed: bool = False
