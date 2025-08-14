@@ -79,7 +79,7 @@ class Dictionary(Base):
 
     title: Mapped[str] = mapped_column(String, nullable=False)
     
-    phrases: Mapped[List["Phrase"]] = relationship("Phrase", backref="dictionary")
+    # phrases: Mapped[List["Phrase"]] = relationship("Phrase", backref="dictionary")
 
 
 class Phrase(Base):
@@ -89,4 +89,4 @@ class Phrase(Base):
     phrase: Mapped[str] = mapped_column(String, nullable=False)
     normal_form: Mapped[str] = mapped_column(String, nullable=False)
 
-    dictionary: Mapped["Dictionary"] = relationship("Dictionary", backref="phrases")
+    # dictionary: Mapped["Dictionary"] = relationship("Dictionary", backref="phrases")
