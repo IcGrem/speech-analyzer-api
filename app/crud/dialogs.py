@@ -436,6 +436,46 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         
         return result_dict
 
+    async def get_employee_average_metrics_by_organization(
+        self, 
+        db: AsyncSession, 
+        organization_id: UUID,
+        metric_types: List[str],
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[Dict[str, Any]]:
+        """Получить средние метрики всех сотрудников организации с фильтрацией по метрикам и датам"""
+        from app.models.users import Employee
+        
+        # Строим запрос с выбранными метриками
+        select_fields = [
+            Employee.id,
+            Employee.first_name,
+            Employee.last_name
+        ]
+        
+        for metric_type in metric_types:
+            metric_column = getattr(Dialog, metric_type)
+            select_fields.append(func.avg(metric_column).label(f"avg_{metric_type}"))
+        
+        query = select(*select_fields).join(Employee, Dialog.employee_id == Employee.id).where(
+            Employee.organization_id == organization_id
+        )
+        
+        # Фильтр по датам
+        if start_date:
+            adjusted_start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(Dialog.recording_start_date >= adjusted_start_date)
+        if end_date:
+            adjusted_end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            query = query.where(Dialog.recording_start_date <= adjusted_end_date)
+            
+        query = query.group_by(Employee.id, Employee.first_name, Employee.last_name)
+        query = query.order_by(Employee.first_name, Employee.last_name)
+        
+        result = await db.execute(query)
+        return result.fetchall()
+
 
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog) 

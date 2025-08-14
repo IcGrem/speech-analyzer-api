@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import ForeignKey, Enum, String, Float, DateTime, Integer, Boolean
 from uuid import UUID
-from typing import Any
+from typing import Any, List
 
 from app.models.users import Employee
 from app.db.base_class import Base
@@ -72,3 +72,21 @@ class AudioDataForAnalysis(Base):
     full_audio_filename: Mapped[str] = mapped_column(String, nullable=True)
     is_analyzed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     transcribed_text: Mapped[str] = mapped_column(String, nullable=True)
+
+
+class Dictionary(Base):
+    __tablename__ = "dictionary"
+
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    
+    phrases: Mapped[List["Phrase"]] = relationship("Phrase", backref="dictionary")
+
+
+class Phrase(Base):
+    __tablename__ = "phrases"
+
+    dictionary_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    phrase: Mapped[str] = mapped_column(String, nullable=False)
+    normal_form: Mapped[str] = mapped_column(String, nullable=False)
+
+    dictionary: Mapped["Dictionary"] = relationship("Dictionary", backref="phrases")

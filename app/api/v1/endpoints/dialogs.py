@@ -577,6 +577,86 @@ async def get_organization_average_metrics(
     )
 
 
+@router.get("/get-employee-average-metrics/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Получение средних метрик всех сотрудников организации в формате графика")
+async def get_employee_average_metrics(
+    organization_id: UUID,
+    metric_types: str = Query(..., description="Список метрик через запятую (greeting_farewell_score,completeness_score,tone_score,openness_helpfulness_score,listening_score,empathy_score,speech_quality_score,response_time_score,overall_score)"),
+    start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
+    end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> EmployeeMetricsChartResponse:
+    """Получение средних метрик всех сотрудников организации в формате Chart.js с фильтрацией по метрикам и датам"""
+    
+    # Парсим список метрик
+    try:
+        parsed_metric_types = [metric.strip() for metric in metric_types.split(',')]
+        # Валидируем метрики
+        valid_metrics = {
+            "greeting_farewell_score", "completeness_score", "tone_score", 
+            "openness_helpfulness_score", "listening_score", "empathy_score", 
+            "speech_quality_score", "response_time_score", "overall_score"
+        }
+        for metric in parsed_metric_types:
+            if metric not in valid_metrics:
+                raise HTTPException(status_code=400, detail=f"Неверная метрика: {metric}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Неверный формат списка метрик: {str(e)}")
+    
+    # Словарь для преобразования названий метрик
+    metrics_names = {
+        "greeting_farewell_score": "Приветствие и прощание",
+        "completeness_score": "Полнота ответа",
+        "tone_score": "Тон общения",
+        "openness_helpfulness_score": "Открытость и готовность помочь",
+        "listening_score": "Умение слушать",
+        "empathy_score": "Эмпатия",
+        "speech_quality_score": "Грамотная речь",
+        "response_time_score": "Время ответа",
+        "overall_score": "Итоговая оценка"
+    }
+    
+    # Получаем данные средних метрик сотрудников
+    logger.info(f"Запрос средних метрик сотрудников для организации {organization_id}, metrics={parsed_metric_types}, start_date={start_date}, end_date={end_date}")
+    employees_data = await dialog_crud.get_employee_average_metrics_by_organization(
+        db, organization_id, parsed_metric_types, start_date, end_date
+    )
+    logger.info(f"Получено {len(employees_data)} сотрудников")
+    
+    # Генерируем случайные цвета для каждого сотрудника
+    colors = [
+        "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
+        "#f43f5e", "#ef4444", "#f97316", "#f59e0b", "#eab308",
+        "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
+        "#0ea5e9", "#3b82f6", "#ccc6f1", "#8b5cf6", "#a855f7"
+    ]
+    
+    # Формируем labels (названия метрик)
+    labels = [metrics_names[metric_type] for metric_type in parsed_metric_types]
+    
+    # Формируем datasets (данные сотрудников)
+    datasets = []
+    for i, employee in enumerate(employees_data):
+        employee_name = f"{employee.first_name} {employee.last_name}"
+        data = []
+        
+        for metric_type in parsed_metric_types:
+            metric_value = float(getattr(employee, f"avg_{metric_type}") or 0.0)
+            data.append(round(metric_value, 2))
+        
+        dataset = ChartDataset(
+            label=employee_name,
+            data=data,
+            backgroundColor=colors[i % len(colors)]
+        )
+        datasets.append(dataset)
+    
+    return EmployeeMetricsChartResponse(
+        labels=labels,
+        datasets=datasets
+    )
+
+
 # @router.get("/get-dialogs-by-type/{conversation_type}", response_model=List[DialogList], description="Получение диалогов по типу разговора")
 # async def get_dialogs_by_type(
 #     conversation_type: str,
