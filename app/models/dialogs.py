@@ -20,11 +20,13 @@ class Dialog(Base):
     
     employee_id: Mapped[UUID] = mapped_column(ForeignKey("employees.id"), nullable=False)
     conversation_type: Mapped[ConversationType] = mapped_column(Enum(ConversationType), nullable=False, default=ConversationType.UNKNOWN)
-    conversation: Mapped[str] = mapped_column(String, nullable=False)  # JSON поле для хранения разговора
-    filename: Mapped[str] = mapped_column(nullable=False)  # Наименование файла
-    recording_start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)  # Дата начала записи
-    recording_end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)  # Дата окончания записи
-    
+    conversation: Mapped[str] = mapped_column(String, nullable=False)
+    filename: Mapped[str] = mapped_column(nullable=False)
+    recording_start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recording_end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    audio_data_id: Mapped[UUID] = mapped_column(ForeignKey("audio_data.id"), nullable=True)
+    dictionaries: Mapped[str] = mapped_column(String, nullable=True)
+
     # Метрики диалога
     greeting_farewell_score: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)  # Приветствие и прощание
     completeness_score: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)  # Полнота ответа

@@ -482,5 +482,84 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         return result.fetchall()
 
 
+    async def get_dialogs_with_pagination(
+        self,
+        db: AsyncSession,
+        page: int = 1,
+        size: int = 10,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        employee_ids: Optional[List[UUID]] = None,
+        sort_by: str = "recording_start_date",
+        sort_order: str = "desc"
+    ) -> Dict[str, Any]:
+        """Получить диалоги с пагинацией и фильтрами"""
+        from app.models.users import Employee
+        
+        # Базовый запрос с JOIN для получения имени сотрудника
+        base_query = select(
+            Dialog.id,
+            Dialog.recording_start_date,
+            Dialog.overall_score,
+            Dialog.dictionaries,
+            Employee.first_name,
+            Employee.last_name
+        ).join(Employee, Dialog.employee_id == Employee.id)
+        
+        # Применяем фильтры
+        if start_date:
+            base_query = base_query.where(Dialog.recording_start_date >= start_date)
+        if end_date:
+            base_query = base_query.where(Dialog.recording_start_date <= end_date)
+        if employee_ids:
+            base_query = base_query.where(Employee.id.in_(employee_ids))
+        
+        # Запрос для подсчета общего количества
+        count_query = select(func.count()).select_from(base_query.subquery())
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
+        
+        # Вычисляем пагинацию
+        total_page = (total_count + size - 1) // size  # Округление вверх
+        offset = (page - 1) * size
+        
+        # Применяем сортировку
+        if sort_by == "recording_start_date":
+            sort_column = Dialog.recording_start_date
+        elif sort_by == "overall_score":
+            sort_column = Dialog.overall_score
+        elif sort_by == "employee_name":
+            sort_column = Employee.first_name
+        else:
+            sort_column = Dialog.recording_start_date  # По умолчанию
+        
+        if sort_order.lower() == "asc":
+            main_query = base_query.order_by(sort_column.asc()).offset(offset).limit(size)
+        else:
+            main_query = base_query.order_by(sort_column.desc()).offset(offset).limit(size)
+        result = await db.execute(main_query)
+        rows = result.fetchall()
+        
+        # Формируем данные
+        data = []
+        for row in rows:
+            employee_name = f"{row.first_name} {row.last_name}"
+            data.append({
+                "date": row.recording_start_date,
+                "employee_name": employee_name,
+                "dialog_id": row.id,
+                "overall_score": float(row.overall_score) if row.overall_score is not None else None,
+                "dictionaries": row.dictionaries or ""
+            })
+        
+        return {
+            "total_count": total_count,
+            "total_page": total_page,
+            "page": page,
+            "size": size,
+            "data": data
+        }
+
+
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog) 

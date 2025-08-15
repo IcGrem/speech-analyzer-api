@@ -34,6 +34,8 @@ class DialogBase(BaseModel):
     filename: str = Field(..., min_length=1, max_length=500, description="Наименование файла")
     recording_start_date: datetime = Field(..., description="Дата начала записи")
     recording_end_date: datetime = Field(..., description="Дата окончания записи")
+    audio_data_id: UUID = Field(..., description="ID аудиоданных")
+    dictionaries: str = Field(..., description="Строка с названиями словарей")
     
     # Метрики диалога
     greeting_farewell_score: Optional[float] = Field(0.0, ge=0.0, description="Приветствие и прощание")
@@ -60,6 +62,8 @@ class DialogUpdate(BaseModel):
     filename: Optional[str] = Field(None, min_length=1, max_length=500, description="Наименование файла")
     recording_start_date: Optional[datetime] = Field(None, description="Дата начала записи")
     recording_end_date: Optional[datetime] = Field(None, description="Дата окончания записи")
+    audio_data_id: Optional[UUID] = Field(None, description="ID аудиоданных")
+    dictionaries: Optional[str] = Field(None, description="Строка с названиями словарей")
     
     # Метрики диалога
     greeting_farewell_score: Optional[float] = Field(None, ge=0.0, description="Приветствие и прощание")
@@ -97,6 +101,8 @@ class DialogList(BaseModel):
     filename: str
     recording_start_date: datetime
     recording_end_date: datetime
+    audio_data_id: UUID
+    dictionaries: str
     created_at: datetime
     
     # Метрики диалога
@@ -190,3 +196,23 @@ class OrganizationAverageMetricsResponse(BaseModel):
     """Схема ответа для средних метрик организации"""
     average_scores: Dict[str, AverageMetricScore]
     graphic: OrganizationDailyMetricsChartResponse
+
+
+class PaginatedResponse(BaseModel):
+    """Схема пагинированного ответа"""
+    total_count: int = Field(..., description="Общее количество записей")
+    total_page: int = Field(..., description="Общее количество страниц")
+    page: int = Field(..., description="Номер текущей страницы")
+    size: int = Field(..., description="Количество записей на странице")
+    data: List[Dict[str, Any]] = Field(..., description="Список объектов")
+
+
+class DialogListItem(BaseModel):
+    """Схема элемента списка диалогов для пагинации"""
+    date: datetime = Field(..., description="Дата начала записи")
+    employee_name: str = Field(..., description="ФИО сотрудника")
+    dialog_id: UUID = Field(..., description="ID диалога")
+    overall_score: Optional[float] = Field(None, description="Итоговая оценка")
+    dictionaries: str = Field("", description="Строка с названиями словарей")
+    
+    model_config = ConfigDict(from_attributes=True)

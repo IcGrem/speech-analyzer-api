@@ -25,7 +25,8 @@ from app.schemas.dialogs import (
     ChartDataset,
     MetricType,
     OrganizationAverageMetricsResponse,
-    AverageMetricScore
+    AverageMetricScore,
+    PaginatedResponse
 )
 from app.schemas.audio_data import AudioDataList, AudioDataStats
 from app.schemas.users import UserResponse
@@ -109,13 +110,50 @@ async def get_audiodata_from_voca(
         )
 
 
-@router.get("/get-dialogs", response_model=List[DialogList], description="Получение списка всех диалогов")
+@router.get("/get-dialogs", response_model=PaginatedResponse, description="Получение списка диалогов с пагинацией и фильтрами")
 async def get_dialogs(
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    size: int = Query(10, ge=1, le=100, description="Количество записей на странице"),
+    start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
+    end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
+    employee_ids: Optional[str] = Query(None, description="Список ID сотрудников через запятую"),
+    sort_by: str = Query("recording_start_date", description="Поле для сортировки (recording_start_date, overall_score, employee_name)"),
+    sort_order: str = Query("desc", description="Порядок сортировки (asc, desc)"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
     db: AsyncSession = Depends(get_db)
-) -> List[DialogList]:
-    """Получение списка всех диалогов"""
-    return await dialog_crud.get_all(db)
+) -> PaginatedResponse:
+    """Получение списка диалогов с пагинацией и фильтрами"""
+    
+    # Парсим employee_ids из строки
+    parsed_employee_ids = None
+    if employee_ids:
+        try:
+            parsed_employee_ids = [UUID(emp_id.strip()) for emp_id in employee_ids.split(',')]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат ID сотрудников")
+    
+    # Валидируем параметры сортировки
+    valid_sort_fields = {"recording_start_date", "overall_score", "employee_name"}
+    if sort_by not in valid_sort_fields:
+        raise HTTPException(status_code=400, detail=f"Неверное поле для сортировки. Допустимые значения: {', '.join(valid_sort_fields)}")
+    
+    valid_sort_orders = {"asc", "desc"}
+    if sort_order.lower() not in valid_sort_orders:
+        raise HTTPException(status_code=400, detail="Неверный порядок сортировки. Допустимые значения: asc, desc")
+    
+    # Получаем данные с пагинацией
+    result = await dialog_crud.get_dialogs_with_pagination(
+        db=db,
+        page=page,
+        size=size,
+        start_date=start_date,
+        end_date=end_date,
+        employee_ids=parsed_employee_ids,
+        sort_by=sort_by,
+        sort_order=sort_order.lower()
+    )
+    
+    return PaginatedResponse(**result)
 
 
 @router.post("/create-dialog", response_model=DialogResponse, description="Создание нового диалога")
