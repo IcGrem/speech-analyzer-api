@@ -80,6 +80,7 @@ class Dictionary(Base):
     __tablename__ = "dictionary"
 
     title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=True)
     
     # phrases: Mapped[List["Phrase"]] = relationship("Phrase", backref="dictionary")
 
@@ -87,7 +88,7 @@ class Dictionary(Base):
 class Phrase(Base):
     __tablename__ = "phrases"
 
-    dictionary_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    dictionary_id: Mapped[UUID] = mapped_column(ForeignKey("dictionary.id"), nullable=False)
     phrase: Mapped[str] = mapped_column(String, nullable=False)
     normal_form: Mapped[str] = mapped_column(String, nullable=False)
 
