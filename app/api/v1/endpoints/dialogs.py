@@ -581,6 +581,7 @@ async def get_organization_average_metrics(
 async def get_employee_average_metrics(
     organization_id: UUID,
     metric_types: str = Query(..., description="Список метрик через запятую (greeting_farewell_score,completeness_score,tone_score,openness_helpfulness_score,listening_score,empathy_score,speech_quality_score,response_time_score,overall_score)"),
+    employee_ids: Optional[str] = Query(None, description="Список ID сотрудников через запятую"),
     start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
     end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
@@ -603,6 +604,14 @@ async def get_employee_average_metrics(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Неверный формат списка метрик: {str(e)}")
     
+    # Парсим employee_ids из строки
+    parsed_employee_ids = None
+    if employee_ids:
+        try:
+            parsed_employee_ids = [UUID(emp_id.strip()) for emp_id in employee_ids.split(',')]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат ID сотрудников")
+    
     # Словарь для преобразования названий метрик
     metrics_names = {
         "greeting_farewell_score": "Приветствие и прощание",
@@ -619,7 +628,7 @@ async def get_employee_average_metrics(
     # Получаем данные средних метрик сотрудников
     logger.info(f"Запрос средних метрик сотрудников для организации {organization_id}, metrics={parsed_metric_types}, start_date={start_date}, end_date={end_date}")
     employees_data = await dialog_crud.get_employee_average_metrics_by_organization(
-        db, organization_id, parsed_metric_types, start_date, end_date
+        db, organization_id, parsed_metric_types, parsed_employee_ids, start_date, end_date
     )
     logger.info(f"Получено {len(employees_data)} сотрудников")
     

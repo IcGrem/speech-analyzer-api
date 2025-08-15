@@ -6,6 +6,7 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 
 from app.crud.base import CRUDBase
+from app.models.users import Employee
 from app.models.dialogs import Dialog, ConversationType
 from app.schemas.dialogs import DialogCreate, DialogUpdate
 
@@ -442,10 +443,10 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         organization_id: UUID,
         metric_types: List[str],
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
+        employee_ids: Optional[List[UUID]] = None
     ) -> List[Dict[str, Any]]:
         """Получить средние метрики всех сотрудников организации с фильтрацией по метрикам и датам"""
-        from app.models.users import Employee
         
         # Строим запрос с выбранными метриками
         select_fields = [
@@ -469,6 +470,10 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         if end_date:
             adjusted_end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
             query = query.where(Dialog.recording_start_date <= adjusted_end_date)
+
+        # Фильтр по сотрудникам
+        if employee_ids:
+            query = query.where(Employee.id.in_(employee_ids))
             
         query = query.group_by(Employee.id, Employee.first_name, Employee.last_name)
         query = query.order_by(Employee.first_name, Employee.last_name)

@@ -1,18 +1,15 @@
 import asyncio
 import json
 import random
+import math
 from datetime import datetime, timedelta, timezone
-from typing import List
 import uuid
 
 from faker import Faker
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.db.session import async_session
 from app.models.users import Organization, Employee
 from app.models.dialogs import Dialog, ConversationType
-from app.models.users import UserRole
 
 fake = Faker('ru_RU')
 
@@ -48,7 +45,7 @@ def generate_conversation() -> str:
     messages = []
     speakers = ["Сотрудник", "Клиент"]
     
-    for i in range(random.randint(5, 15)):
+    for _ in range(random.randint(5, 15)):
         speaker = random.choice(speakers)
         message = fake.text(max_nb_chars=100)
         timestamp = fake.date_time_between(start_date='-1h', end_date='now', tzinfo=timezone.utc)
@@ -62,24 +59,79 @@ def generate_conversation() -> str:
     return json.dumps(messages, ensure_ascii=False)
 
 
-def generate_dialog_metrics() -> dict:
-    """Генерирует реалистичные метрики диалога"""
-    return {
-        "greeting_farewell_score": round(random.uniform(0.1, 5.0), 2),
-        "completeness_score": round(random.uniform(0.1, 5.0), 2),
-        "tone_score": round(random.uniform(0.1, 5.0), 2),
-        "openness_helpfulness_score": round(random.uniform(0.1, 5.0), 2),
-        "listening_score": round(random.uniform(0.1, 5.0), 2),
-        "empathy_score": round(random.uniform(0.1, 5.0), 2),
-        "speech_quality_score": round(random.uniform(0.1, 5.0), 2),
-        "response_time_score": round(random.uniform(0.1, 5.0), 2),
-        "overall_score": round(random.uniform(0.1, 5.0), 2)
-    }
+METRIC_NAMES = [
+    "greeting_farewell_score",
+    "completeness_score",
+    "tone_score",
+    "openness_helpfulness_score",
+    "listening_score",
+    "empathy_score",
+    "speech_quality_score",
+    "response_time_score",
+]
+
+DEFAULT_WEIGHTS = {
+    "greeting_farewell_score": 0.08,
+    "completeness_score": 0.14,
+    "tone_score": 0.12,
+    "openness_helpfulness_score": 0.14,
+    "listening_score": 0.18,
+    "empathy_score": 0.18,
+    "speech_quality_score": 0.10,
+    "response_time_score": 0.06,
+}
 
 
-def generate_dialog(employee_id: uuid.UUID, date: datetime) -> dict:
+def clamp_0_5(x: float) -> float:
+    return max(0.1, min(5.0, x))
+
+
+def build_employee_profiles(employees: list[Employee]) -> tuple[dict, dict]:
+    """Создает профиль и начальное состояние по каждому сотруднику."""
+    profiles: dict[uuid.UUID, dict] = {}
+    states: dict[uuid.UUID, dict] = {}
+    for e in employees:
+        base_quality = random.uniform(1.5, 4.3)
+        profile = {"baseline": {}, "phi": {}, "sigma": {}, "weights": DEFAULT_WEIGHTS}
+        state = {}
+        for m in METRIC_NAMES:
+            baseline = clamp_0_5(base_quality + random.gauss(0.0, 0.4))
+            phi = random.uniform(0.7, 0.95)
+            sigma = random.uniform(0.06, 0.22)
+            profile["baseline"][m] = baseline
+            profile["phi"][m] = phi
+            profile["sigma"][m] = sigma
+            state[m] = baseline
+        profiles[e.id] = profile
+        states[e.id] = state
+    return profiles, states
+
+
+def generate_dialog_metrics(profile: dict, state: dict, current_date: datetime, day_index: int) -> dict:
+    """AR(1) по каждой метрике + сезонность по дням недели + небольшой тренд."""
+    weekday = current_date.weekday()
+    season = 0.12 * math.sin(2 * math.pi * (weekday / 7.0))
+    trend = min(0.5, 0.01 * (day_index / 30))
+
+    out = {}
+    for m in METRIC_NAMES:
+        baseline = profile["baseline"][m] + season + trend
+        phi = profile["phi"][m]
+        sigma = profile["sigma"][m]
+        prev = state.get(m, baseline)
+        value = phi * prev + (1 - phi) * baseline + random.gauss(0.0, sigma)
+        value = clamp_0_5(value)
+        state[m] = value
+        out[m] = round(value, 2)
+
+    weights = profile["weights"]
+    overall = sum(out[m] * weights[m] for m in METRIC_NAMES) + random.gauss(0.0, 0.05)
+    out["overall_score"] = round(clamp_0_5(overall), 2)
+    return out
+
+
+def generate_dialog(employee_id: uuid.UUID, date: datetime, profile: dict, state: dict, day_index: int) -> dict:
     """Генерирует данные диалога"""
-    # Генерируем время начала и окончания записи в пределах дня
     start_time = date.replace(
         hour=random.randint(8, 18),
         minute=random.randint(0, 59),
@@ -89,7 +141,7 @@ def generate_dialog(employee_id: uuid.UUID, date: datetime) -> dict:
     duration_minutes = random.randint(5, 45)
     end_time = start_time + timedelta(minutes=duration_minutes)
     
-    metrics = generate_dialog_metrics()
+    metrics = generate_dialog_metrics(profile, state, date, day_index)
     
     return {
         "employee_id": employee_id,
@@ -105,16 +157,14 @@ def generate_dialog(employee_id: uuid.UUID, date: datetime) -> dict:
 async def seed_data():
     """Основная функция для заполнения базы данных"""
     async with async_session() as session:
-        # Создаем организацию
         print("Создаем организацию...")
         org_data = generate_organization()
         organization = Organization(**org_data)
         session.add(organization)
         await session.flush()
         
-        # Создаем 10 сотрудников
         print("Создаем сотрудников...")
-        employees = []
+        employees: list[Employee] = []
         for _ in range(10):
             emp_data = generate_employee(organization.id)
             employee = Employee(**emp_data)
@@ -123,35 +173,42 @@ async def seed_data():
         
         await session.flush()
         
-        # Создаем диалоги для каждого сотрудника батчами
+        # Профили сотрудников для стабильных средних и автокорреляции
+        employee_profiles, employee_states = build_employee_profiles(employees)
+        
         print("Создаем диалоги...")
         start_date = datetime.now(timezone.utc) - timedelta(days=30)
-        batch_size = 100  # Сохраняем по 100 диалогов за раз
+        batch_size = 100
+        pending = 0
+        total_saved = 0
         
         for employee in employees:
             print(f"Создаем диалоги для сотрудника {employee.first_name} {employee.last_name}...")
+            profile = employee_profiles[employee.id]
+            state = employee_states[employee.id]
             
             for day in range(30):
                 current_date = start_date + timedelta(days=day)
                 
-                # 20 диалогов в день
                 for _ in range(20):
-                    dialog_data = generate_dialog(employee.id, current_date)
+                    dialog_data = generate_dialog(employee.id, current_date, profile, state, day)
                     dialog = Dialog(**dialog_data)
                     session.add(dialog)
+                    pending += 1
                     
-                    # Сохраняем батчами
-                    if len(session.new) >= batch_size:
+                    if pending >= batch_size:
                         await session.commit()
-                        print(f"Сохранено {batch_size} диалогов...")
+                        total_saved += pending
+                        print(f"Сохранено {pending} диалогов...")
+                        pending = 0
         
-        # Сохраняем оставшиеся диалоги
-        if len(session.new) > 0:
+        if pending > 0:
             await session.commit()
-            print(f"Сохранено {len(session.new)} оставшихся диалогов...")
+            total_saved += pending
+            print(f"Сохранено {pending} оставшихся диалогов...")
         
-        print("Данные успешно добавлены!")
+        print(f"Данные успешно добавлены! Всего сохранено диалогов: {total_saved}")
 
 
 if __name__ == "__main__":
-    asyncio.run(seed_data()) 
+    asyncio.run(seed_data())
