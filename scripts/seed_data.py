@@ -177,7 +177,9 @@ async def seed_data():
         employee_profiles, employee_states = build_employee_profiles(employees)
         
         print("Создаем диалоги...")
-        start_date = datetime.now(timezone.utc) - timedelta(days=30)
+        #start_date = datetime.now(timezone.utc) - timedelta(days=30)
+        # для генерации задаём дату от 01.07.2025
+        start_date = datetime(2025, 7, 1, tzinfo=timezone.utc)
         batch_size = 100
         pending = 0
         total_saved = 0
