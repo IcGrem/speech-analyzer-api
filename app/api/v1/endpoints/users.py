@@ -49,7 +49,8 @@ async def login(
     )
     return {
         "user": user,
-        "access_token": f"Bearer {access_token}"
+        "access_token": f"Bearer {access_token}",
+        "organization_id": settings.DEFAULT_ORGANIZATION_ID
     }
 
 @router.post("/logout")

@@ -58,6 +58,7 @@ class UserResponseWithToken(BaseModel):
     """Схема ответа для пользователя с токеном"""
     user: UserResponse
     access_token: str = Field(..., description="Токен пользователя")
+    organization_id: UUID = Field(..., description="ID организации")
     
     model_config = ConfigDict(from_attributes=True)
 
