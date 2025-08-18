@@ -230,7 +230,6 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
         """Получить метрики сотрудников организации с фильтром по датам"""
-        from app.models.users import Employee
         
         query = select(
             Employee.id,
@@ -268,7 +267,6 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
         """Получить суммарные метрики организации по дням"""
-        from app.models.users import Employee
         
         query = select(
             func.date(Dialog.recording_start_date).label("date"),
@@ -306,7 +304,6 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
         """Получить метрики организации по дням для построения графика с фильтрацией по метрикам"""
-        from app.models.users import Employee
         
         # Строим запрос с выбранными метриками
         select_fields = [
@@ -494,7 +491,6 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         sort_order: str = "desc"
     ) -> Dict[str, Any]:
         """Получить диалоги с пагинацией и фильтрами"""
-        from app.models.users import Employee
         
         # Базовый запрос с JOIN для получения имени сотрудника
         base_query = select(
@@ -502,6 +498,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             Dialog.recording_start_date,
             Dialog.overall_score,
             Dialog.dictionaries,
+            Dialog.conversation_type,
             Employee.first_name,
             Employee.last_name
         ).join(Employee, Dialog.employee_id == Employee.id)
@@ -548,6 +545,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
                 "date": row.recording_start_date,
                 "employee_name": employee_name,
                 "dialog_id": row.id,
+                "conversation_type": row.conversation_type,
                 "overall_score": float(row.overall_score) if row.overall_score is not None else None,
                 "dictionaries": row.dictionaries or ""
             })

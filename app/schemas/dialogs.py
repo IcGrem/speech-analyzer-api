@@ -212,6 +212,7 @@ class DialogListItem(BaseModel):
     date: datetime = Field(..., description="Дата начала записи")
     employee_name: str = Field(..., description="ФИО сотрудника")
     dialog_id: UUID = Field(..., description="ID диалога")
+    conversation_type: ConversationType = Field(..., description="Тип разговора")
     overall_score: Optional[float] = Field(None, description="Итоговая оценка")
     dictionaries: str = Field("", description="Строка с названиями словарей")
     
