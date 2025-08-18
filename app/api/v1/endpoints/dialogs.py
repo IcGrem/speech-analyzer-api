@@ -418,14 +418,6 @@ async def get_organization_daily_metrics(
         }
     }
     
-    # Генерируем случайные цвета для каждой метрики
-    # colors = [
-    #     "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
-    #     "#f43f5e", "#ef4444", "#f97316", "#f59e0b", "#eab308",
-    #     "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
-    #     "#0ea5e9", "#3b82f6", "#ccc6f1", "#8b5cf6", "#a855f7"
-    # ]
-    
     # Группируем данные по метрикам
     metric_data = {}
     all_dates = set()
@@ -666,7 +658,12 @@ async def get_employee_average_metrics(
     # Получаем данные средних метрик сотрудников
     logger.info(f"Запрос средних метрик сотрудников для организации {organization_id}, metrics={parsed_metric_types}, start_date={start_date}, end_date={end_date}")
     employees_data = await dialog_crud.get_employee_average_metrics_by_organization(
-        db, organization_id, parsed_metric_types, parsed_employee_ids, start_date, end_date
+        db,
+        organization_id,
+        parsed_metric_types,
+        start_date=start_date,
+        end_date=end_date,
+        employee_ids=parsed_employee_ids,
     )
     logger.info(f"Получено {len(employees_data)} сотрудников")
     
