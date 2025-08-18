@@ -16,7 +16,13 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     
     async def get(self, db: AsyncSession, id: Any) -> Optional[Dialog]:
         """Получить диалог по ID с загрузкой сотрудника"""
-        query = select(self.model).options(selectinload(self.model.employee)).where(self.model.id == id)
+        query = (
+            select(self.model)
+            .options(
+                selectinload(self.model.employee).selectinload(Employee.organization)
+            )
+            .where(self.model.id == id)
+        )
         result = await db.execute(query)
         return result.scalar_one_or_none()
     
@@ -33,7 +39,9 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         **filters
     ) -> List[Dialog]:
         """Получить список диалогов с фильтрацией, пагинацией и загрузкой сотрудников"""
-        query = select(self.model).options(selectinload(self.model.employee))
+        query = select(self.model).options(
+            selectinload(self.model.employee).selectinload(Employee.organization)
+        )
         
         # Применяем фильтры
         for field, value in filters.items():
@@ -97,7 +105,11 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     
     async def get_by_filename(self, db: AsyncSession, filename: str) -> Optional[Dialog]:
         """Получить диалог по имени файла с загрузкой сотрудника"""
-        query = select(self.model).options(selectinload(self.model.employee)).where(self.model.filename == filename)
+        query = (
+            select(self.model)
+            .options(selectinload(self.model.employee).selectinload(Employee.organization))
+            .where(self.model.filename == filename)
+        )
         result = await db.execute(query)
         return result.scalar_one_or_none()
     
@@ -157,7 +169,11 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         await db.refresh(db_obj)
         
         # Загружаем связанного сотрудника
-        query = select(self.model).options(selectinload(self.model.employee)).where(self.model.id == db_obj.id)
+        query = (
+            select(self.model)
+            .options(selectinload(self.model.employee).selectinload(Employee.organization))
+            .where(self.model.id == db_obj.id)
+        )
         result = await db.execute(query)
         return result.scalar_one()
     
@@ -178,7 +194,11 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         await db.refresh(db_obj)
         
         # Загружаем связанного сотрудника
-        query = select(self.model).options(selectinload(self.model.employee)).where(self.model.id == db_obj.id)
+        query = (
+            select(self.model)
+            .options(selectinload(self.model.employee).selectinload(Employee.organization))
+            .where(self.model.id == db_obj.id)
+        )
         result = await db.execute(query)
         return result.scalar_one()
     
@@ -197,7 +217,11 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         )
         if result:
             # Загружаем связанного сотрудника
-            query = select(self.model).options(selectinload(self.model.employee)).where(self.model.id == dialog_id)
+            query = (
+                select(self.model)
+                .options(selectinload(self.model.employee).selectinload(Employee.organization))
+                .where(self.model.id == dialog_id)
+            )
             db_result = await db.execute(query)
             return db_result.scalar_one()
         return None
@@ -217,7 +241,11 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         )
         if result:
             # Загружаем связанного сотрудника
-            query = select(self.model).options(selectinload(self.model.employee)).where(self.model.id == dialog_id)
+            query = (
+                select(self.model)
+                .options(selectinload(self.model.employee).selectinload(Employee.organization))
+                .where(self.model.id == dialog_id)
+            )
             db_result = await db.execute(query)
             return db_result.scalar_one()
         return None

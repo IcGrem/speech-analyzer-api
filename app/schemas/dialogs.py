@@ -30,7 +30,7 @@ class DialogBase(BaseModel):
     """Базовая схема для диалога"""
     employee_id: UUID = Field(..., description="ID сотрудника")
     conversation_type: ConversationType = Field(ConversationType.UNKNOWN, description="Тип разговора")
-    conversation: Dict[str, Any] = Field(..., description="JSON структура разговора")
+    conversation: Any = Field(..., description="JSON структура разговора")
     filename: str = Field(..., min_length=1, max_length=500, description="Наименование файла")
     recording_start_date: datetime = Field(..., description="Дата начала записи")
     recording_end_date: datetime = Field(..., description="Дата окончания записи")
@@ -82,6 +82,10 @@ class DialogResponse(DialogBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    # Ослабляем типы для ответа, так как в БД могут быть NULL/строковые JSON
+    conversation: Any = Field(..., description="JSON структура разговора")
+    audio_data_id: Optional[UUID] = Field(None, description="ID аудиоданных")
+    dictionaries: Optional[str] = Field("", description="Строка с названиями словарей")
     
     model_config = ConfigDict(from_attributes=True)
 
