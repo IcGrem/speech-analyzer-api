@@ -565,7 +565,8 @@ class AudioDataProcessor(LoggerMixin):
             
             # Формируем имя выходного файла
             output_filename = self._get_full_audio_filename(employee_id, previous_day)
-            output_path = employee_folder / output_filename
+            # output_path = employee_folder / output_filename
+            output_path = output_filename
             
             # Склеиваем аудиофайлы
             success = await self._concatenate_audio_files(audio_files, output_path)
