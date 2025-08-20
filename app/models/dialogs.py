@@ -25,6 +25,7 @@ class Dialog(Base):
     recording_start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     recording_end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     audio_data_id: Mapped[UUID] = mapped_column(ForeignKey("audio_data.id"), nullable=True)
+    audio_data_for_analysis_id: Mapped[UUID] = mapped_column(ForeignKey("audio_data_for_analysis.id"), nullable=True)
     dictionaries: Mapped[str] = mapped_column(String, nullable=True)
 
     # Метрики диалога

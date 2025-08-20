@@ -35,6 +35,7 @@ class DialogBase(BaseModel):
     recording_start_date: datetime = Field(..., description="Дата начала записи")
     recording_end_date: datetime = Field(..., description="Дата окончания записи")
     audio_data_id: UUID = Field(..., description="ID аудиоданных")
+    audio_data_for_analysis_id: UUID = Field(..., description="ID аудиоданных для анализа")
     dictionaries: str = Field(..., description="Строка с названиями словарей")
     
     # Метрики диалога
@@ -63,6 +64,7 @@ class DialogUpdate(BaseModel):
     recording_start_date: Optional[datetime] = Field(None, description="Дата начала записи")
     recording_end_date: Optional[datetime] = Field(None, description="Дата окончания записи")
     audio_data_id: Optional[UUID] = Field(None, description="ID аудиоданных")
+    audio_data_for_analysis_id: Optional[UUID] = Field(None, description="ID аудиоданных для анализа")
     dictionaries: Optional[str] = Field(None, description="Строка с названиями словарей")
     
     # Метрики диалога
@@ -85,6 +87,7 @@ class DialogResponse(DialogBase):
     # Ослабляем типы для ответа, так как в БД могут быть NULL/строковые JSON
     conversation: Any = Field(..., description="JSON структура разговора")
     audio_data_id: Optional[UUID] = Field(None, description="ID аудиоданных")
+    audio_data_for_analysis_id: Optional[UUID] = Field(None, description="ID аудиоданных для анализа")
     dictionaries: Optional[str] = Field("", description="Строка с названиями словарей")
     
     model_config = ConfigDict(from_attributes=True)
@@ -106,6 +109,7 @@ class DialogList(BaseModel):
     recording_start_date: datetime
     recording_end_date: datetime
     audio_data_id: UUID
+    audio_data_for_analysis_id: UUID
     dictionaries: str
     created_at: datetime
     
