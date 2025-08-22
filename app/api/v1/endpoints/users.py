@@ -11,7 +11,7 @@ from app.crud.users import user_crud
 from app.schemas.users import UserResponse, UserCreate, UserUpdate, UserResponseWithToken
 from app.services.dependencies import get_current_user
 from app.core.exceptions import InvalidCredentialsError, UserNotFoundError
-from app.core.security import verify_password, create_access_token
+from app.core.security import verify_password, create_access_token, get_password_hash
 from app.services.main_services import EnumEncoder
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -84,6 +84,7 @@ async def create_user(
     db: AsyncSession = Depends(get_db)
 ) -> UserResponse:
     """Создание нового пользователя"""
+    user.hashed_password = get_password_hash(user.hashed_password)
     return await user_crud.create(db, user)
 
 
