@@ -1,6 +1,11 @@
+import os
+
 from typing import List, Any
 from pydantic import Field, field_validator, PostgresDsn
 from pydantic_settings import BaseSettings
+from pathlib import Path
+
+from pygments.lexer import default
 
 
 class Settings(BaseSettings):
@@ -75,7 +80,14 @@ class Settings(BaseSettings):
     
     # Организация по умолчанию
     DEFAULT_ORGANIZATION_ID: str = Field(default="00000000-0000-0000-0000-000000000000", env="DEFAULT_ORGANIZATION_ID")
-    
+
+    # Обработка аудио
+    FRAME_RATE = 16000
+
+    # ML-настройки
+    PATH_W_FULL_AUDIO: Path = Path("full_speech_data")
+    LOGGER_FOLDER: str = os.path.join('app', 'ml', 'logs', 'main')
+
     class Config:
         env_file = ".env"
         case_sensitive = True
