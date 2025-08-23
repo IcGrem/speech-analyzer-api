@@ -1,6 +1,6 @@
 import os
 
-from typing import List, Any
+from typing import List, Any, Annotated, Optional
 from pydantic import Field, field_validator, PostgresDsn
 from pydantic_settings import BaseSettings
 from pathlib import Path
@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     # Организация по умолчанию
     DEFAULT_ORGANIZATION_ID: str = Field(default="00000000-0000-0000-0000-000000000000", env="DEFAULT_ORGANIZATION_ID")
 
+    # ML-настройки
     # Обработка аудио
     FRAME_RATE: int = 16000
     # минимальная длительность блока с речью, пример 0.5 * 60 = 30 секунд
@@ -88,12 +89,32 @@ class Settings(BaseSettings):
     # минимальная длительность паузы между речью, пример 0.34 * 60 = 20 секунд
     MIN_DURATION_PAUSE: int = round(0.34 * 60)
 
-    # ML-настройки
-    PATH_W_FULL_AUDIO: Path = Path("full_speech_data")
+    # папка куда сохраняются дневные аудиозаписи
+    FOLDER_W_FULL_AUDIO: str = os.path.join("full_speech_data")
+    # папка куда сохраняются блоки для дневных аудио
+    FOLDER_W_DIALOGUES: str = os.path.join("dialogues")
+    # папка куда сохраняются аудио с разделением на спикеров
+    FOLDER_W_DIARIZATION: str = os.path.join("diarization")
+
+    # логгер
     LOGGER_FOLDER: str = os.path.join('app', 'ml', 'logs', 'main')
+
+    # модели
     VAD_MODEL: str = "pyannote/voice-activity-detection"
     TRANSCRIPTION_MODEL: str = "openai/whisper-large-v3"
     DIARIZATION_MODEL: str = "pyannote/speaker-diarization-3.1"
+
+    uninformative_phrases: Annotated[List[str], Field(default_factory=lambda: [
+        'Продолжение следует...',
+        'Спасибо за субтитры Алексею Дубровскому.',
+        'Субтитры сделал DimaTorzok',
+        'Субтитры создавал DimaTorzok',
+        'Спасибо.',
+        ' НЕРАЗБОРЧИВО',
+        'Пока.',
+        'Это очень хорошо.',
+        'Субтитры подогнал «Симон»',
+    ])]
 
     class Config:
         env_file = ".env"

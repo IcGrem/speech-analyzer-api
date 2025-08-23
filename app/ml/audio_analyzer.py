@@ -1,28 +1,23 @@
 import torch
-import asyncio
 
-from pyannote.audio import Pipeline
 from pyannote.audio.pipelines import VoiceActivityDetection
-
 from pydub import AudioSegment
-from pydub.silence import split_on_silence
 
 from app.core.config import settings
-# from app.core.logging import get_logger
-# logger = get_logger(__name__)
 from app.ml.logger import logger
-from app.ml.utils import timeit
-
-
 
 class AudioAnalyzer:
+
+    """
+    Класс для обработки аудио:
+    1. Разделение аудио на блоки по паузам с использованием VAD
+    2.
+    """
 
     def __init__(self):
         self.logger = logger
         self.vad_model = settings.VAD_MODEL
         self.vad_pipeline = VoiceActivityDetection.from_pretrained(self.vad_model).to(torch.device("cuda"))
-        pass
-
 
     def vad_split_audio_into_dialogues(self,
                                        path_audio,
@@ -54,8 +49,6 @@ class AudioAnalyzer:
                 else:
                     duration_pause = segment_current.start - segment_previous.end
                     durations_pause.append(duration_pause)
-                    # print('===================')
-                    # print(round(duration_pause, 2))
                     # если пауза довольно длинная, значит можно завершать диалог
                     if duration_pause >= min_duration_pause:
                         duration_dialogue = end_dialogue - start_dialogue

@@ -30,3 +30,20 @@ def get_url_db():
     if url and "asyncpg" in url:
         url = url.replace("postgresql+asyncpg://", "postgresql://")
     return url
+
+def save_txt_file(way_file, text, mode="w", encoding="utf-8"):
+
+    """
+    Функция для создания txt-файла
+
+    :param way_file: путь к файлу
+    :param text: текст файла
+    :param mode: мод для записи w или a
+    :param encoding: формат кодировки файла
+    :return:
+    """
+
+    with open(way_file, mode, encoding=encoding) as text_file:
+        text_file.write(text)
+
+    return
