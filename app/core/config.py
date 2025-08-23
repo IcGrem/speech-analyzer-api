@@ -83,11 +83,17 @@ class Settings(BaseSettings):
 
     # Обработка аудио
     FRAME_RATE: int = 16000
+    # минимальная длительность блока с речью, пример 0.5 * 60 = 30 секунд
+    MIN_DURATION_DIALOGUE: int = round(0.5 * 60)
+    # минимальная длительность паузы между речью, пример 0.34 * 60 = 20 секунд
+    MIN_DURATION_PAUSE: int = round(0.34 * 60)
 
     # ML-настройки
     PATH_W_FULL_AUDIO: Path = Path("full_speech_data")
     LOGGER_FOLDER: str = os.path.join('app', 'ml', 'logs', 'main')
     VAD_MODEL: str = "pyannote/voice-activity-detection"
+    TRANSCRIPTION_MODEL: str = "openai/whisper-large-v3"
+    DIARIZATION_MODEL: str = "pyannote/speaker-diarization-3.1"
 
     class Config:
         env_file = ".env"

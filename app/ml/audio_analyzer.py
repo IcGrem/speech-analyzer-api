@@ -20,6 +20,7 @@ class AudioAnalyzer:
     def __init__(self):
         self.logger = logger
         self.vad_model = settings.VAD_MODEL
+        self.vad_pipeline = VoiceActivityDetection.from_pretrained(self.vad_model).to(torch.device("cuda"))
         pass
 
 
@@ -30,50 +31,54 @@ class AudioAnalyzer:
         """
         Делит аудио на чанки по тишине.
 
-        :param audio_path: Путь к аудиофайлу
+        :param path_audio: Путь к аудиофайлу
         :param min_duration_dialogue: минимальная длительность диалога
         :param min_duration_pause: минимальная пауза, чтобы отсечь диалог
         :return: Список объектов AudioSegment, представляющих диалоги
         """
 
-        vad_pipeline = VoiceActivityDetection.from_pretrained(self.vad_model).to(torch.device("cuda"))
-        vad_result = vad_pipeline(path_audio)
-
+        vad_result = self.vad_pipeline(path_audio)
         audio = AudioSegment.from_file(path_audio)
 
-        audio_dialogues = list()
-        durations_pause = []
-        segment_previous = None
-        start_dialogue = None
-        end_dialogue = None
-        # перебираем фрагменты речи
-        for segment_current in vad_result.get_timeline():
-            # если первый сегмент ещё не определили, устанавливаем его, а также старт и конец диалога
-            if segment_previous is None:
-                start_dialogue = segment_current.start
-                end_dialogue = segment_current.end
-            # если у нас есть предыдущий отрезок и текущий, то проверяем размер паузы между ними
-            else:
-                duration_pause = segment_current.start - segment_previous.end
-                durations_pause.append(duration_pause)
-                # print('===================')
-                # print(round(duration_pause, 2))
-                # если пауза довольно длинная, значит можно завершать диалог
-                if duration_pause >= min_duration_pause:
-                    duration_dialogue = end_dialogue - start_dialogue
-                    # также проверяем длительность диалога, если она меньше 30 секунд, значит пропускаем
-                    if duration_dialogue >= min_duration_dialogue:
-                        logger.info('===================')
-                        logger.info('Сохраняем чанк')
-                        logger.info(round(duration_pause, 2))
-                        # определяем новые начала и конец диалога
-                        audio_dialogues.append(
-                            (audio[int(start_dialogue * 1000):int(end_dialogue * 1000)], start_dialogue, end_dialogue)
-                            )
-                        start_dialogue = segment_current.start
-                        end_dialogue = segment_current.end
-                # если пауза небольшая, то увеличиваем длительность диалога
-                else:
+        audio_dialogues, durations_pause = list(), list()
+        segment_previous, start_dialogue, end_dialogue = None, None, None
+
+        try:
+            # перебираем фрагменты речи
+            for segment_current in vad_result.get_timeline():
+                # если первый сегмент ещё не определили, устанавливаем его, а также старт и конец диалога
+                if segment_previous is None:
+                    start_dialogue = segment_current.start
                     end_dialogue = segment_current.end
-            segment_previous = segment_current
-        return durations_pause, audio_dialogues
+                # если у нас есть предыдущий отрезок и текущий, то проверяем размер паузы между ними
+                else:
+                    duration_pause = segment_current.start - segment_previous.end
+                    durations_pause.append(duration_pause)
+                    # print('===================')
+                    # print(round(duration_pause, 2))
+                    # если пауза довольно длинная, значит можно завершать диалог
+                    if duration_pause >= min_duration_pause:
+                        duration_dialogue = end_dialogue - start_dialogue
+                        # также проверяем длительность диалога, если она меньше 30 секунд, значит пропускаем
+                        if duration_dialogue >= min_duration_dialogue:
+                            # logger.info('===================')
+                            # logger.info('Сохраняем чанк')
+                            # logger.info(f' Длительность паузы {round(duration_pause, 2)}')
+                            # logger.info(f' Длительность блока {round(duration_dialogue, 2)}')
+                            # определяем новые начала и конец диалога
+                            audio_dialogues.append(
+                                (
+                                    audio[int(start_dialogue * 1000):int(end_dialogue * 1000)],
+                                    start_dialogue,
+                                    end_dialogue)
+                                )
+                            start_dialogue = segment_current.start
+                            end_dialogue = segment_current.end
+                    # если пауза небольшая, то увеличиваем длительность диалога
+                    else:
+                        end_dialogue = segment_current.end
+                segment_previous = segment_current
+            return 200, durations_pause, audio_dialogues
+        except:
+            logger.error('Ошибка при нарезке дневного файла!')
+            return 500, durations_pause, audio_dialogues
