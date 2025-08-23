@@ -82,11 +82,12 @@ class Settings(BaseSettings):
     DEFAULT_ORGANIZATION_ID: str = Field(default="00000000-0000-0000-0000-000000000000", env="DEFAULT_ORGANIZATION_ID")
 
     # Обработка аудио
-    FRAME_RATE = 16000
+    FRAME_RATE: int = 16000
 
     # ML-настройки
     PATH_W_FULL_AUDIO: Path = Path("full_speech_data")
     LOGGER_FOLDER: str = os.path.join('app', 'ml', 'logs', 'main')
+    VAD_MODEL: str = "pyannote/voice-activity-detection"
 
     class Config:
         env_file = ".env"
