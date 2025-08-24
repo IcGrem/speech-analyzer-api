@@ -9,6 +9,7 @@ from app.models.dialogs import AudioDataForAnalysis
 from app.ml.audio_analyzer import AudioAnalyzer
 from app.ml.requests_db import DBConnection
 from app.ml.speech2text_analyzer import TextExtractor
+from app.ml.llm_analyzer import LLMAnalyzer
 from app.ml.logger import logger
 
 
@@ -30,6 +31,7 @@ def main_audio_analyzer_function():
     db_connection = DBConnection()
     audio_chunker = AudioAnalyzer()
     transcriptor = TextExtractor()
+    llm_analyzer = LLMAnalyzer()
 
     all_rows_full_audio = db_connection.get_all_rows(AudioDataForAnalysis)
     for row_full_audio in all_rows_full_audio[:1]:
@@ -90,6 +92,21 @@ def main_audio_analyzer_function():
             continue
 
         logger.info(f"STAGE 2: Диаризация и транскрибация для аудио блоков {folder_w_dialogues} завершена!")
+
+        # STAGE 3. Разделение текста на диалоги с использованием LLM
+        logger.info(f"STAGE 3: Разделение блоков на диалоги с использованием LLM {folder_w_dialogues}!")
+        llm_analyzer.extract_dialogues(current_folder)
+
+        if status_diarization_transcription == 500:
+            logger.error(f"STAGE 3: Разделение блоков на диалоги с использованием LLM {folder_w_dialogues} не завершена!")
+            continue
+
+        logger.info(f"STAGE 3: Разделение блоков на диалоги с использованием LLM {folder_w_dialogues} завершена!")
+
+
+
+
+
 
 
     return
