@@ -451,7 +451,8 @@ class AudioDataProcessor(LoggerMixin):
             try:
                 first_audio = AudioSegment.from_file(str(valid_files[0]))
                 base_channels = first_audio.channels
-                base_frame_rate = first_audio.frame_rate
+                # base_frame_rate = first_audio.frame_rate
+                base_frame_rate = settings.FRAME_RATE
                 base_sample_width = first_audio.sample_width
             except Exception as e:
                 self.logger.error(f"Ошибка при загрузке первого файла {valid_files[0]}: {e}")
@@ -565,8 +566,8 @@ class AudioDataProcessor(LoggerMixin):
             
             # Формируем имя выходного файла
             output_filename = self._get_full_audio_filename(employee_id, previous_day)
-            # output_path = employee_folder / output_filename
-            output_path = output_filename
+            output_path = employee_folder / output_filename
+            # output_path = Path(output_filename)
             
             # Склеиваем аудиофайлы
             success = await self._concatenate_audio_files(audio_files, output_path)
@@ -583,7 +584,8 @@ class AudioDataProcessor(LoggerMixin):
                 self.logger.warning(f"Обновлено {updated_count} из {len(audio_data_ids)} записей")
             
             # Создаем запись в таблице audio_data_for_analysis
-            relative_filename = str(output_path.relative_to(self.full_speech_data_path))
+            # relative_filename = str(output_path.relative_to(self.full_speech_data_path))
+            relative_filename = output_path.name
             await audio_data_for_analysis_crud.create_or_update_for_employee_date(
                 db, employee_id, previous_day, relative_filename
             )

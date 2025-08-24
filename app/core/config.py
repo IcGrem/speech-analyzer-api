@@ -1,6 +1,11 @@
-from typing import List, Any
+import os
+
+from typing import List, Any, Annotated, Optional
 from pydantic import Field, field_validator, PostgresDsn
 from pydantic_settings import BaseSettings
+from pathlib import Path
+
+from pygments.lexer import default
 
 
 class Settings(BaseSettings):
@@ -75,7 +80,48 @@ class Settings(BaseSettings):
     
     # Организация по умолчанию
     DEFAULT_ORGANIZATION_ID: str = Field(default="00000000-0000-0000-0000-000000000000", env="DEFAULT_ORGANIZATION_ID")
-    
+
+    # ML-настройки
+    # Обработка аудио
+    FRAME_RATE: int = 16000
+    # минимальная длительность блока с речью, пример 0.5 * 60 = 30 секунд
+    MIN_DURATION_DIALOGUE: int = round(0.5 * 60)
+    # минимальная длительность паузы между речью, пример 0.34 * 60 = 20 секунд
+    MIN_DURATION_PAUSE: int = round(0.34 * 60)
+
+    # папка куда сохраняются дневные аудиозаписи
+    FOLDER_W_FULL_AUDIO: str = os.path.join("full_speech_data")
+    # папка куда сохраняются блоки для дневных аудио
+    FOLDER_W_DIALOGUES: str = os.path.join("dialogues")
+    # папка куда сохраняются аудио с разделением на спикеров
+    FOLDER_W_DIARIZATION: str = os.path.join("diarization")
+
+    # логгер
+    LOGGER_FOLDER: str = os.path.join('app', 'ml', 'logs', 'main')
+
+    # модели
+    VAD_MODEL: str = "pyannote/voice-activity-detection"
+    TRANSCRIPTION_MODEL: str = "openai/whisper-large-v3"
+    DIARIZATION_MODEL: str = "pyannote/speaker-diarization-3.1"
+
+    # подключение к OpenAI
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1/"
+    OPENAI_MODEL_TYPE: str = "gpt-4o"
+    OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
+
+    # обработка текста
+    uninformative_phrases: Annotated[List[str], Field(default_factory=lambda: [
+        'Продолжение следует...',
+        'Спасибо за субтитры Алексею Дубровскому.',
+        'Субтитры сделал DimaTorzok',
+        'Субтитры создавал DimaTorzok',
+        'Спасибо.',
+        ' НЕРАЗБОРЧИВО',
+        'Пока.',
+        'Это очень хорошо.',
+        'Субтитры подогнал «Симон»',
+    ])]
+
     class Config:
         env_file = ".env"
         case_sensitive = True

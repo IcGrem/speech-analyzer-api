@@ -1,0 +1,99 @@
+import os
+
+from tqdm import tqdm
+from datetime import timedelta
+
+from app.core.config import settings
+from app.models.dialogs import AudioDataForAnalysis
+
+from app.ml.audio_analyzer import AudioAnalyzer
+from app.ml.requests_db import DBConnection
+from app.ml.speech2text_analyzer import TextExtractor
+from app.ml.logger import logger
+
+
+def main_audio_analyzer_function():
+
+    """
+    Основная функция для запуска ML-сервиса
+
+    :return:
+    """
+
+    # создание общего словаря
+    # norm_form_phrase, [origin, name_dict]
+    # general_dict_phrases = db_connection.create_general_dict_phrases()
+    # assert len(general_dict_phrases) == 864
+
+    # Инициализация основных подключений
+    main_folder_audio: str = settings.FOLDER_W_FULL_AUDIO
+    db_connection = DBConnection()
+    audio_chunker = AudioAnalyzer()
+    transcriptor = TextExtractor()
+
+    all_rows_full_audio = db_connection.get_all_rows(AudioDataForAnalysis)
+    for row_full_audio in all_rows_full_audio[:1]:
+
+        # обновления поля в модели
+        # db_connection.update_row(model=AudioDataForAnalysis,
+        #                          filter_field='id',
+        #                          filter_value=row_full_audio.id,
+        #                          is_analyzed=True)
+
+        # employee_id = row_full_audio.employee_id
+        # получение сотрудника по id
+        # employee = db_connection.get_by_attribute(Employee, 'employee_id', employee_id)
+        # создание записи диалога, зная сотрудника и дневную запись
+        # db_connection.create_dialog(employee, row_full_audio)
+
+        audio_name = row_full_audio.full_audio_filename
+        audio_name = '58393_2025-07-15_full.wav'
+        logger.info(f"Обработка аудио {audio_name}")
+        audio_folder, _ = audio_name.split('_full')
+        current_folder: str = os.path.join(main_folder_audio, audio_folder)
+        folder_w_dialogues: str =  os.path.join(current_folder, settings.FOLDER_W_DIALOGUES)
+
+        os.makedirs(folder_w_dialogues, exist_ok=True)
+        path_full_audio = os.path.join(current_folder, audio_name)
+
+        # STAGE 1. Разделение дневных аудио на блоки (потенциальные диалоги)
+        logger.info(f"STAGE 1: Разделение дневного аудио {audio_name} на блоки")
+        status_vad, durations_pause, chunks =  audio_chunker.vad_split_audio_into_dialogues(
+            path_audio=path_full_audio,
+            min_duration_dialogue=settings.MIN_DURATION_DIALOGUE,
+            min_duration_pause=settings.MIN_DURATION_PAUSE
+        )
+
+        if status_vad == 500:
+            logger.error(f"STAGE 1: Разделение дневного аудио {audio_name} на блоки не завершено!")
+            continue
+
+        # Сохраняем чанки/блоки как отдельные файлы
+        for i, (chunk, start_dialogue, end_dialogue) in tqdm(enumerate(chunks, 1)):
+            start_dialogue = timedelta(seconds=round(start_dialogue))
+            end_dialogue = timedelta(seconds=round(end_dialogue))
+            name_chunk = f"chunk_{i}_{audio_folder}_{start_dialogue}_{end_dialogue}.wav".replace(':', '_')
+            chunk.export(os.path.join(folder_w_dialogues, name_chunk), format="wav")
+            logger.info(f"Сегмент {i} сохранён как {name_chunk}")
+
+        del chunks, durations_pause
+
+        logger.info(f"STAGE 1: Разделение дневного аудио {audio_name} на блоки успешно завершена!")
+
+        # STAGE 2. Выделение текста из аудио блоков
+        logger.info(f"STAGE 2: Диаризация и транскрибация для аудио блоков {folder_w_dialogues}")
+        # transcriptor.get_transcription(current_folder)
+        status_diarization_transcription = transcriptor.diarization_transcription_analysis(current_folder)
+
+        if status_diarization_transcription == 500:
+            logger.error(f"STAGE 2: Диаризация и транскрибация для аудио блоков {folder_w_dialogues} не завершена!")
+            continue
+
+        logger.info(f"STAGE 2: Диаризация и транскрибация для аудио блоков {folder_w_dialogues} завершена!")
+
+
+    return
+
+
+if __name__ == '__main__':
+    main_audio_analyzer_function()
