@@ -32,7 +32,7 @@ def main_audio_analyzer_function():
     transcriptor = TextExtractor()
 
     all_rows_full_audio = db_connection.get_all_rows(AudioDataForAnalysis)
-    for row_full_audio in all_rows_full_audio:
+    for row_full_audio in all_rows_full_audio[:1]:
 
         # обновления поля в модели
         # db_connection.update_row(model=AudioDataForAnalysis,
@@ -47,6 +47,7 @@ def main_audio_analyzer_function():
         # db_connection.create_dialog(employee, row_full_audio)
 
         audio_name = row_full_audio.full_audio_filename
+        audio_name = '58393_2025-07-15_full.wav'
         logger.info(f"Обработка аудио {audio_name}")
         audio_folder, _ = audio_name.split('_full')
         current_folder: str = os.path.join(main_folder_audio, audio_folder)
@@ -87,6 +88,9 @@ def main_audio_analyzer_function():
         if status_diarization_transcription == 500:
             logger.error(f"STAGE 2: Диаризация и транскрибация для аудио блоков {folder_w_dialogues} не завершена!")
             continue
+
+        logger.info(f"STAGE 2: Диаризация и транскрибация для аудио блоков {folder_w_dialogues} завершена!")
+
 
     return
 
