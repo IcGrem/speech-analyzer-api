@@ -1,23 +1,32 @@
-import re
 import time
 import os
+import json
 
 from openai import OpenAI, RateLimitError
 from json.decoder import JSONDecodeError
+from typing import List
 
 from app.core.config import settings
 from app.ml import prompts
 from app.ml.logger import logger
+from app.ml.regex import *
 
 class LLMAnalyzer:
 
     def __init__(self):
         self.model_type = settings.OPENAI_MODEL_TYPE
 
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY,
-                             base_url=settings.OPENAI_BASE_URL)
+        if not settings.USE_PROXY:
+            self.client = OpenAI(api_key=settings.OPENAI_API_KEY,
+                                 base_url=settings.OPENAI_BASE_URL)
+        else:
+            self.client = OpenAI(api_key=settings.OPENAI_API_KEY,
+                                 base_url=settings.OPENAI_BASE_URL,
+                                 http_client=settings.PROXY_URL)
 
-        self.context = None
+        self.context = ""
+        self.split_dialogues = ""
+        self.identified_dialogues = list()
         self.prompt = None
 
 
@@ -29,19 +38,20 @@ class LLMAnalyzer:
         :return: возвращает промт
         """
 
-        self.prompt = self.context
+        self.prompt = prompts.PROMPT_TO_EXTRACT_DIALOGS + self.context
 
         return self.prompt
 
 
-    def request_model(self) -> str|int:
+    def request_model(self) -> int:
         """
         Метод отправки запроса
 
         :return: возвращает ответ от модели в виде текста, либо код ошибки, если при запросе что-то случилось
         """
 
-        prompt = prompts.PROMPT_TO_EXTRACT_DIALOGS + self.create_prompt()
+        prompt = self.create_prompt()
+        self.split_dialogues = ""
 
         while True:
             try:
@@ -55,7 +65,8 @@ class LLMAnalyzer:
                     ]
                 )
 
-                return completion.choices[0].message.content
+                self.split_dialogues = completion.choices[0].message.content
+                return 200
 
             except JSONDecodeError as e:
                 logger.info(
@@ -94,6 +105,59 @@ class LLMAnalyzer:
 
         return transcription_names
 
+    def filter_dialogues(self) -> List:
+
+        """
+        Метод для фильтрации и селекции диалогов с помощью регулярных выражений
+        Менеджер и клиент
+        Разговор коллег с клиентом
+        Разговор коллег
+        Неизвестно
+
+        :return: возвращает список диалогов определенного типа
+        """
+
+        dialogues_list = [
+
+            {"type": dtype, "text": match.strip()}
+
+            for regex, dtype in [
+            (PATTERN_MANAGERS_CLIENT, "m2c"),
+            (PATTERN_MANAGERS_UNKNOWN, "m2m"),
+            ]
+            for match in regex.findall(self.split_dialogues)
+        ]
+
+        return dialogues_list
+
+    def get_dialogues_by_type(self, folder_w_dialogues: str, chunk_name: str):
+
+        """
+        Метод для получения диалогов исключительно типа "Менеджер и клиент" и "Разговор коллег с клиентом"
+        и их сохранения
+        :param folder_w_dialogues: папка с блоками для дневной аудио
+        :param chunk_name: имя чанка/блока аудио текущего
+        :return:
+        """
+
+        self.identified_dialogues = self.filter_dialogues()
+        path_save_identified_dialogues = os.path.join(folder_w_dialogues, f'{chunk_name}_identified_dialogues.txt')
+        if self.identified_dialogues:
+
+            with open(path_save_identified_dialogues, "w", encoding="utf-8") as f:
+                json.dump(self.identified_dialogues, f, ensure_ascii=False, indent=4)
+
+            for dialog in self.identified_dialogues:
+
+                logger.info(f"Найден диалог типа {dialog.get('type')}")
+                logger.info(dialog)
+
+        else:
+            logger.info(
+                f"Диалоги не были найдены в {chunk_name}!"
+            )
+        return self.identified_dialogues
+
 
     def extract_dialogues(self, current_folder: str):
 
@@ -111,9 +175,13 @@ class LLMAnalyzer:
 
             for transcription_name in transcription_names:
 
-                path_transcription = os.path.join(folder_w_dialogues, f'{transcription_name}')
-                name_txt_llm, _ = transcription_name.split('_transcription')
-                path_result = os.path.join(folder_w_dialogues, f'{name_txt_llm}_llm.txt')
+                logger.info(
+                    f"Запуск анализа транскрибации {transcription_name} и поиска диалогов в ней определенного типа"
+                )
+
+                path_transcription = os.path.join(folder_w_dialogues, transcription_name)
+                chunk_name, _ = transcription_name.split('_transcription')
+                path_result = os.path.join(folder_w_dialogues, f'{chunk_name}_llm.txt')
 
                 if os.path.exists(path_transcription):
 
@@ -144,8 +212,12 @@ class LLMAnalyzer:
                             )
                             continue
 
+                        # cохраняем файл с разбитыми диалогами
                         with open(path_result, "w", encoding="utf-8-sig") as f:
-                            f.write(result)
+                            f.write(self.split_dialogues)
+
+                        # выделяем диалоги определенных типов
+                        identified_dialogues = self.get_dialogues_by_type(folder_w_dialogues, chunk_name)
 
                     else:
                         logger.info(
@@ -155,8 +227,8 @@ class LLMAnalyzer:
                     logger.info(
                         f'Транскрибта для {path_transcription} не существует!'
                     )
-        except:
+        except Exception as e:
             logger.error(
-                'Ошибка при анализе транскрибций'
+                f'Ошибка при анализе транскрибций {e}'
             )
             return 501

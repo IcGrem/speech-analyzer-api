@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1/"
     OPENAI_MODEL_TYPE: str = "gpt-4o"
     OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
+    # использовать прокси или нет
+    USE_PROXY: bool = False
+    PROXY_URL: str = Field(default="", env="PROXY_URL")
 
     # обработка текста
     uninformative_phrases: Annotated[List[str], Field(default_factory=lambda: [
@@ -123,7 +126,9 @@ class Settings(BaseSettings):
     ])]
 
     #  минимальный размер длины текста для блока текста
+    CLEANING_DIARIZATION_FOLDER: bool = False
     MIN_CONTENT_LENGTH: int = 100
+
 
     class Config:
         env_file = ".env"
