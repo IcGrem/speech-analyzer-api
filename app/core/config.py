@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     TRANSCRIPTION_MODEL: str = "openai/whisper-large-v3"
     DIARIZATION_MODEL: str = "pyannote/speaker-diarization-3.1"
 
+    # подключение к OpenAI
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1/"
+    OPENAI_MODEL_TYPE: str = "gpt-4o"
+    OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
+
+    # обработка текста
     uninformative_phrases: Annotated[List[str], Field(default_factory=lambda: [
         'Продолжение следует...',
         'Спасибо за субтитры Алексею Дубровскому.',

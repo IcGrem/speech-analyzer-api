@@ -98,16 +98,18 @@ class TextExtractor:
         return replicas_list
 
     def extract_and_save_text(self,
-                              audio: AudioSegment,
+                              path_audio: str,
                               replicas_list: list,
-                              folder_w_diarization):
+                              folder_w_diarization: str,
+                              chunk_number: str):
 
         """
         Метод на обработку аудио и выделения текста
 
-        :param audio: исходное аудио
+        :param path_audio: путь до исходного аудио блока
         :param replicas_list: список реплик
         :param folder_w_diarization: папка для сохранения фрагментов реплик
+        :param chunk_number: str
         :return:
         """
 
@@ -119,7 +121,9 @@ class TextExtractor:
 
             return bool(re.fullmatch(r'[\s\W_]*', text))
 
-        speakers_list = set(replica[0] for replica in replicas_list)
+        # загружаем исходное аудио блока
+        audio = AudioSegment.from_file(path_audio)
+        # speakers_list = set(replica[0] for replica in replicas_list)
         # speakers_audio = dict(zip(speakers_list, len(speakers_list) * [AudioSegment.empty()]))
 
         for [speaker, start, end] in replicas_list:
@@ -134,7 +138,7 @@ class TextExtractor:
                 segment = audio[start:end]
                 start_sec = start//1000
                 end_sec = end // 1000
-                path_speaker_chunk = os.path.join(folder_w_diarization, f"{start_sec}_{end_sec}_{speaker}.wav")
+                path_speaker_chunk = os.path.join(folder_w_diarization, f"{chunk_number}_{start_sec}_{end_sec}_{speaker}.wav")
                 segment = segment.set_frame_rate(settings.FRAME_RATE)
                 segment.export(path_speaker_chunk, format="wav")
 
@@ -152,7 +156,9 @@ class TextExtractor:
         return
 
 
-    def diarization_transcription_analysis(self, current_folder: str):
+    def diarization_transcription_analysis(self,
+                                           current_folder: str,
+                                           cleaning=False):
 
         """
         Метод предназначен для
@@ -160,6 +166,7 @@ class TextExtractor:
         2. Разделение на реплики и транскрибация каждой реплики
 
         :param current_folder: папка, где лежит все для конкретной дневной записи
+        :param cleaning: флаг, определяющий чистить ли папку с диаризацией, после выполнения всех операций или нет
         :return: статус выполнения транксрибации/диризации
         """
 
@@ -180,6 +187,22 @@ class TextExtractor:
             logger.info(f'Очистка папки {folder} прошла успешно!')
             return
 
+        def get_chunk_number(chunk_name: str) -> str:
+            """
+            Функция для получения номера чанка
+
+            :param chunk_name: имя следующего вида chunk_1_58393_2025-07-15_0_00_03_0_01_22.wav
+            :return: строку chunk_1
+            """
+            match = re.match(r"chunk_(\d+)", chunk_name)
+
+            chunk_number = ""
+
+            if match:
+                chunk_number = f"chunk{match.group(1)}"
+
+            return  chunk_number
+
         try:
 
             folder_w_dialogues: str =  os.path.join(current_folder, settings.FOLDER_W_DIALOGUES)
@@ -194,7 +217,8 @@ class TextExtractor:
             for chunk_name in chunks_names:
                 # путь до файла с транскрибцией
                 chunk_name, _ = chunk_name.split('.')
-                self.path_to_transcription = os.path.join(folder_w_dialogues, f'{chunk_name}_transcription_2.txt')
+                chunk_number = get_chunk_number(chunk_name)
+                self.path_to_transcription = os.path.join(folder_w_dialogues, f'{chunk_name}_transcription.txt')
 
                 if not os.path.exists(self.path_to_transcription):
 
@@ -206,16 +230,16 @@ class TextExtractor:
 
                     path_audio = os.path.join(folder_w_dialogues, f"{chunk_name}.wav")
                     # удаление диаризации с прошлого блока аудио, чтобы они не капились
-                    cleaning_folder(folder_w_diarization)
-                    # загружаем исходное аудио блока
-                    audio = AudioSegment.from_file(path_audio)
+                    # cleaning_folder(folder_w_diarization)
 
                     replicas_list = self.diarization_analysis(path_audio)
-                    self.extract_and_save_text(audio, replicas_list, folder_w_diarization)
+                    self.extract_and_save_text(path_audio, replicas_list, folder_w_diarization, chunk_number)
 
                 else:
                     logger.info(f"⚠️ Транскрибация и диаризация для {chunk_name} уже выполнялась!")
-            cleaning_folder(folder_w_diarization)
+
+            if cleaning:
+                cleaning_folder(folder_w_diarization)
         except:
             logger.error('Ошибка при Диаризации/Транскрибации')
             return 500
