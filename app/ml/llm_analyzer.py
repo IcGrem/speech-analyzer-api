@@ -18,7 +18,7 @@ class LLMAnalyzer:
 
     def __init__(self):
         self.model_type = settings.OPENAI_MODEL_TYPE
-        transport = httpx.HTTPTransport(proxy=settings.PROXY_URL)
+        transport = httpx.Proxy(proxy=settings.PROXY_URL)
         http_client = httpx.Client(transport=transport,
             timeout=60.0,            
             follow_redirects=True,
