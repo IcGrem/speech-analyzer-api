@@ -18,7 +18,7 @@ class LLMAnalyzer:
 
     def __init__(self):
         self.model_type = settings.OPENAI_MODEL_TYPE
-        transport = httpx.Proxy(proxy=settings.PROXY_URL)
+        transport = httpx.Proxy(settings.PROXY_URL)
         http_client = httpx.Client(transport=transport,
             timeout=60.0,            
             follow_redirects=True,
@@ -30,6 +30,7 @@ class LLMAnalyzer:
             self.client = OpenAI(api_key=settings.OPENAI_API_KEY,
                                  base_url=settings.OPENAI_BASE_URL,
                                  http_client=http_client)
+
         self.context = ""
         self.split_dialogues = ""
         self.identified_dialogues = list()
@@ -192,103 +193,103 @@ class LLMAnalyzer:
             "Итоговая оценка": "overall_score"
         }
 
-        try:
+        # try:
 
-            folder_w_dialogues: str = os.path.join(current_folder, settings.FOLDER_W_DIALOGUES)
-            transcription_names = self.get_transcriptions_names(folder_w_dialogues)
+        folder_w_dialogues: str = os.path.join(current_folder, settings.FOLDER_W_DIALOGUES)
+        transcription_names = self.get_transcriptions_names(folder_w_dialogues)
 
-            for transcription_name in transcription_names:
+        for transcription_name in transcription_names:
 
-                logger.info(
-                    f"Запуск анализа транскрибации {transcription_name} и поиска диалогов в ней определенного типа"
-                )
+            logger.info(
+                f"Запуск анализа транскрибации {transcription_name} и поиска диалогов в ней определенного типа"
+            )
 
-                path_transcription = os.path.join(folder_w_dialogues, transcription_name)
-                chunk_name, _ = transcription_name.split('_transcription')
-                path_result = os.path.join(folder_w_dialogues, f'{chunk_name}_llm.txt')
+            path_transcription = os.path.join(folder_w_dialogues, transcription_name)
+            chunk_name, _ = transcription_name.split('_transcription')
+            path_result = os.path.join(folder_w_dialogues, f'{chunk_name}_llm.txt')
 
-                if os.path.exists(path_transcription):
+            if os.path.exists(path_transcription):
 
-                    # проверяем пустой транскрипт, чтобы не отправлять пустые запросы
-                    if os.stat(path_transcription).st_size == 0:
+                # проверяем пустой транскрипт, чтобы не отправлять пустые запросы
+                if os.stat(path_transcription).st_size == 0:
+                    logger.info(
+                        f'Файл с транскрипцией {path_transcription} пуст!'
+                    )
+                    continue
+
+                if not os.path.exists(path_result):
+
+                    with open(path_transcription, "r", encoding="utf-8-sig") as f:
+                        context = f.read()
+
+                    # проверяем длину текста, если она небольшая, то смысл отправлять на анализ модели нет
+                    if len(context) < settings.MIN_CONTENT_LENGTH:
                         logger.info(
-                            f'Файл с транскрипцией {path_transcription} пуст!'
+                            f'Файл {path_transcription} слишком короткий ({len(context)} символов). Пропускаем.'
                         )
                         continue
 
-                    if not os.path.exists(path_result):
+                    status, result = self.request_model(context=context)
+                    self.split_dialogues = result
 
-                        with open(path_transcription, "r", encoding="utf-8-sig") as f:
-                            context = f.read()
-
-                        # проверяем длину текста, если она небольшая, то смысл отправлять на анализ модели нет
-                        if len(context) < settings.MIN_CONTENT_LENGTH:
-                            logger.info(
-                                f'Файл {path_transcription} слишком короткий ({len(context)} символов). Пропускаем.'
-                            )
-                            continue
-
-                        status, result = self.request_model(context=context)
-                        self.split_dialogues = result
-
-                        if status == 429:
-                            logger.info(
-                                f"Слишком длинный текст: {self.context}"
-                            )
-                            continue
-
-                        # cохраняем файл с разбитыми диалогами
-                        with open(path_result, "w", encoding="utf-8-sig") as f:
-                            f.write(self.split_dialogues)
-
-                        # выделяем диалоги определенных типов
-                        _ = self.get_dialogues_by_type(folder_w_dialogues, chunk_name)
-                        status_get_scores = self.get_scores(folder_w_dialogues)
-
-                        if status_get_scores == 500:
-                            logger.error(
-                                f'Ошибка при попытке получить оценки для {path_transcription}!'
-                            )
-                            continue
-
-                        # TODO
-                        # список словарей с диалогами для сохранения с диалогами
-                        # self.identified_dialogues
-                        # TODO
-                        # тут записываем в базу
-                        # создание записи диалога, зная сотрудника и дневную запись
-                        
-                        for dialog in self.identified_dialogues:
-                            record_start_date = datetime.fromisoformat(dialog['chunk_name'].split('_')[3])
-                            metrics = {METRIC_NAMES[key]: value for key, value in dialog['scores'].items()}
-                            data_for_save_to_db = {
-                                "employee_id": employee.id,
-                                "conversation_type": dialog['type'],
-                                "conversation": dialog['text'],
-                                "filename": row_full_audio.full_audio_filename,
-                                "recording_start_date": record_start_date,
-                                "recording_end_date": record_start_date,
-                                "audio_data_for_analysis_id": row_full_audio.id,
-                                **metrics
-                            }
-                            db_connection.create_dialog(data_for_save_to_db)
-
-                    else:
+                    if status == 429:
                         logger.info(
-                            f'Анализ LLM для {path_transcription} уже проводился!'
+                            f"Слишком длинный текст: {self.context}"
                         )
+                        continue
+
+                    # cохраняем файл с разбитыми диалогами
+                    with open(path_result, "w", encoding="utf-8-sig") as f:
+                        f.write(self.split_dialogues)
+
+                    # выделяем диалоги определенных типов
+                    _ = self.get_dialogues_by_type(folder_w_dialogues, chunk_name)
+                    status_get_scores = self.get_scores(folder_w_dialogues)
+
+                    if status_get_scores == 500:
+                        logger.error(
+                            f'Ошибка при попытке получить оценки для {path_transcription}!'
+                        )
+                        continue
+
+                    # TODO
+                    # список словарей с диалогами для сохранения с диалогами
+                    # self.identified_dialogues
+                    # TODO
+                    # тут записываем в базу
+                    # создание записи диалога, зная сотрудника и дневную запись
+                    
+                    for dialog in self.identified_dialogues:
+                        record_start_date = datetime.fromisoformat(dialog['chunk_name'].split('_')[3])
+                        metrics = {METRIC_NAMES[key]: value for key, value in dialog['scores'].items()}
+                        data_for_save_to_db = {
+                            "employee_id": employee.id,
+                            "conversation_type": dialog['type'],
+                            "conversation": dialog['text'],
+                            "filename": row_full_audio.full_audio_filename,
+                            "recording_start_date": record_start_date,
+                            "recording_end_date": record_start_date,
+                            "audio_data_for_analysis_id": row_full_audio.id,
+                            **metrics
+                        }
+                        db_connection.create_dialog(data_for_save_to_db)
+
                 else:
                     logger.info(
-                        f'Транскрибта для {path_transcription} не существует!'
+                        f'Анализ LLM для {path_transcription} уже проводился!'
                     )
+            else:
+                logger.info(
+                    f'Транскрибта для {path_transcription} не существует!'
+                )
 
-            return
+        return
 
-        except Exception as e:
-            logger.error(
-                f'Ошибка при анализе транскрибций {e}'
-            )
-            return 500
+        # except Exception as e:
+        #     logger.error(
+        #         f'Ошибка при анализе транскрибций {e}'
+        #     )
+        #     return 500
 
     @staticmethod
     def parse_scores(scores_dialog: str) -> dict[str, float]:
