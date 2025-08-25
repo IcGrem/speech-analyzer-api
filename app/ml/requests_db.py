@@ -47,10 +47,31 @@ class DBConnection:
         """
         query = select(models)
         logger.info(f'Фильтры - {filters}')
+        
         # Применяем фильтры
-        for field, value in filters.items():
-            if hasattr(models, field) and value is not None:
-                query = query.where(getattr(models, field) == value)
+        for filter_key, value in filters.items():
+            if value is None:
+                continue
+
+            parts = filter_key.split('__')
+            field_name = parts[0]
+            operator = 'eq' if len(parts) == 1 else parts[1]
+
+            if not hasattr(models, field_name):
+                continue
+
+            field = getattr(models, field_name)
+            
+            # Выбираем оператор
+            if operator == 'gte':
+                query = query.where(field >= value)
+            elif operator == 'lte':
+                query = query.where(field <= value)
+            elif operator == 'eq':
+                query = query.where(field == value)
+            else:
+                raise ValueError(f"Неизвестный оператор: {operator}")
+
         # Применяем сортировку
         if order_by:
             if order_by.startswith('-'):
