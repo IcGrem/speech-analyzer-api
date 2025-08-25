@@ -1,9 +1,10 @@
 import random
+from typing import Optional
 import uuid
 
 from datetime import datetime
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
 from app.models.dialogs import Dialog, ConversationType, Phrase, Dictionary
@@ -31,6 +32,53 @@ class DBConnection:
         session.close()
 
         return all_rows
+
+    def get_filtered_rows(
+        self,
+        session: Session,
+        models,
+        order_by: Optional[str] = None,
+        **filters,
+        ):
+
+        """
+        Метод на получение отфильтрованных данных из конкретной таблицы
+        """
+        query = select(models)
+        
+        # Применяем фильтры
+        for field, value in filters.items():
+            if hasattr(models, field) and value is not None:
+                query = query.where(getattr(models, field) == value)
+        # Применяем сортировку
+        if order_by:
+            if order_by.startswith('-'):
+                field_name = order_by[1:]
+                if hasattr(models, field_name):
+                    query = query.order_by(getattr(models, field_name).desc())
+            else:
+                if hasattr(models, order_by):
+                    query = query.order_by(getattr(models, order_by))
+        
+        result = session.execute(query)
+        return result.scalars().all()
+
+    def get_by_date_range(
+        self,
+        models,
+        start_date: datetime, 
+        end_date: datetime
+    ):
+        """Получить записи в диапазоне дат"""
+        session = self.session_local()
+        return self.get_filtered_rows(
+            session,
+            models,
+            order_by="-creation_date",
+            creation_date__gte=start_date,
+            creation_date__lte=end_date,
+
+        )
 
     def get_by_attribute(self, model, field_name: str, value):
         """
@@ -63,7 +111,7 @@ class DBConnection:
             return True
         return False
 
-    def create_dialog(self, employee, audio_data_for_analysis):
+    def create_fake_dialog(self, employee, audio_data_for_analysis):
 
         """
         Метод для создания записи с диалогом
@@ -72,7 +120,6 @@ class DBConnection:
         :param audio_data_for_analysis: запись из таблицы с дневными аудио
         :return:
         """
-        # TODO расширить метод или создать новый на создание диалога, фейковый оставить!!!
 
         # M2M = "m2m"  # manager to manager
         # M2C = "m2c"  # manager to customer
@@ -119,6 +166,22 @@ class DBConnection:
             }
 
         dialog_data = generate_dialog(employee.id, audio_data_for_analysis.id)
+        dialog = Dialog(**dialog_data)
+        session = self.session_local()
+        session.add(dialog)
+        session.commit()
+        session.close()
+
+    def create_dialog(self, dialog_data):
+
+        """
+        Метод для создания записи с диалогом
+
+        :param employee: запись из таблицы сотрудников
+        :param audio_data_for_analysis: запись из таблицы с дневными аудио
+        :return:
+        """
+  
         dialog = Dialog(**dialog_data)
         session = self.session_local()
         session.add(dialog)

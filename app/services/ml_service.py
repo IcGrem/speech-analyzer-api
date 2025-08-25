@@ -1,10 +1,12 @@
+import argparse
 import os
 
 from tqdm import tqdm
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.core.config import settings
 from app.models.dialogs import AudioDataForAnalysis
+from app.models.users import Employee
 
 from app.ml.audio_analyzer import AudioAnalyzer
 from app.ml.requests_db import DBConnection
@@ -13,11 +15,13 @@ from app.ml.llm_analyzer import LLMAnalyzer
 from app.ml.logger import logger
 
 
-def main_audio_analyzer_function():
+def main_audio_analyzer_function(start_date, end_date):
 
     """
     Основная функция для запуска ML-сервиса
 
+    :param start_date: Начальная дата диапазона
+    :param end_date: Конечная дата диапазона
     :return:
     """
 
@@ -33,7 +37,7 @@ def main_audio_analyzer_function():
     transcriptor = TextExtractor()
     llm_analyzer = LLMAnalyzer()
 
-    all_rows_full_audio = db_connection.get_all_rows(AudioDataForAnalysis)
+    all_rows_full_audio = db_connection.get_by_date_range(AudioDataForAnalysis, start_date=start_date, end_date=end_date)
     for row_full_audio in all_rows_full_audio:
 
         # обновления поля в модели
@@ -95,12 +99,12 @@ def main_audio_analyzer_function():
         )
 
         # TODO передать пользователя и аудизапись
-        # employee_id = row_full_audio.employee_id
+        employee_id = row_full_audio.employee_id
         # получение сотрудника по id
-        # employee = db_connection.get_by_attribute(Employee, 'employee_id', employee_id)
+        employee = db_connection.get_by_attribute(Employee, 'employee_id', employee_id)
         # создание записи диалога, зная сотрудника и дневную запись
         # db_connection.create_dialog(employee, row_full_audio)
-        status_extract_dialogues = llm_analyzer.extract_dialogues(current_folder)
+        status_extract_dialogues = llm_analyzer.extract_dialogues(current_folder, employee, row_full_audio)
 
         if status_extract_dialogues == 500:
             logger.error(
@@ -139,4 +143,27 @@ def main_audio_analyzer_function():
 
 
 if __name__ == '__main__':
-    main_audio_analyzer_function()
+    parser = argparse.ArgumentParser(description='Анализ аудиоданных за указанный период')
+    parser.add_argument(
+        '--start_date', 
+        type=str, 
+        required=True, 
+        help='Начальная дата в формате YYYY-MM-DD'
+    )
+    parser.add_argument(
+        '--end_date', 
+        type=str, 
+        required=False, 
+        help='Конечная дата в формате YYYY-MM-DD'
+    )
+    
+    args = parser.parse_args()
+    
+    # Преобразование строк в объекты datetime
+    start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
+    if args.end_date:
+        end_date = datetime.strptime(args.end_date, '%Y-%m-%d')
+    else:
+        end_date = start_date
+    
+    main_audio_analyzer_function(start_date, end_date)

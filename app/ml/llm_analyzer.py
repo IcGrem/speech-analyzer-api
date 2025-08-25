@@ -2,6 +2,8 @@ import time
 import os
 import json
 
+from datetime import datetime
+from app.ml.requests_db import DBConnection
 from openai import OpenAI, RateLimitError
 from json.decoder import JSONDecodeError
 from typing import List
@@ -163,15 +165,29 @@ class LLMAnalyzer:
         return self.identified_dialogues
 
 
-    def extract_dialogues(self, current_folder: str):
+    def extract_dialogues(self, current_folder: str, employee, row_full_audio):
 
         """
         Метод для извлечения диалогов из каждого отдельного блока аудио
 
         :param current_folder: путь до текущего дневного аудио
+        :param employee: объект Сотрудника
+        :param row_full_audio: объект full_audio
         :return:
         """
-
+        db_connection = DBConnection()
+        METRIC_NAMES = {
+            "Приветствие и прощание": "greeting_farewell_score",
+            "Полнота ответа": "completeness_score",
+            "Тон общения": "tone_score",
+            "Открытость и готовность помочь": "openness_helpfulness_score",
+            "Умение слушать": "listening_score",
+            "Эмпатия": "empathy_score",
+            "Грамотная речь": "speech_quality_score",
+            "Время ответа": "response_time_score",
+            "Итоговая оценка": "overall_score"
+        }
+        
         try:
 
             folder_w_dialogues: str = os.path.join(current_folder, settings.FOLDER_W_DIALOGUES)
@@ -237,7 +253,21 @@ class LLMAnalyzer:
                         # TODO
                         # тут записываем в базу
                         # создание записи диалога, зная сотрудника и дневную запись
-                        # db_connection.create_dialog(employee, row_full_audio)
+                        
+                        for dialog in self.identified_dialogues:
+                            record_start_date = datetime.fromisoformat(dialog['chunk_name'].split('_')[3])
+                            metrics = {METRIC_NAMES[key]: value for key, value in dialog['scores'].items()}
+                            data_for_save_to_db = {
+                                "employee_id": employee.id,
+                                "conversation_type": dialog['type'],
+                                "conversation": dialog['text'],
+                                "filename": row_full_audio.full_audio_filename,
+                                "recording_start_date": record_start_date,
+                                "recording_end_date": record_start_date,
+                                "audio_data_for_analysis_id": row_full_audio.id,
+                                **metrics
+                            }
+                            db_connection.create_dialog(data_for_save_to_db)
 
                     else:
                         logger.info(
