@@ -277,6 +277,8 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             Employee.organization_id == organization_id
         )
         
+        query = query.where(Dialog.conversation_type == 'm2c')
+
         if start_date:
             query = query.where(Dialog.recording_start_date >= start_date)
         if end_date:
@@ -311,7 +313,9 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         ).join(Employee, Dialog.employee_id == Employee.id).where(
             Employee.organization_id == organization_id
         )
-        
+
+        query = query.where(Dialog.conversation_type == 'm2c')
+
         if start_date:
             query = query.where(Dialog.recording_start_date >= start_date)
         if end_date:
@@ -346,12 +350,15 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             Employee.organization_id == organization_id
         )
         
+        query = query.where(Dialog.conversation_type == 'm2c')
+
         # Фильтр по датам
         if start_date:
             query = query.where(Dialog.recording_start_date >= start_date)
+
         if end_date:
             query = query.where(Dialog.recording_start_date <= end_date)
-            
+                
         query = query.group_by(func.date(Dialog.recording_start_date))
         query = query.order_by(func.date(Dialog.recording_start_date))
         
@@ -391,7 +398,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         ).join(Employee, Dialog.employee_id == Employee.id).where(
             Employee.organization_id == organization_id
         )
-        
+        query = query.where(Dialog.conversation_type == 'm2c')
         # Фильтр по датам
         if start_date:
             adjusted_start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -433,7 +440,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         ).join(Employee, Dialog.employee_id == Employee.id).where(
             Employee.organization_id == organization_id
         )
-        
+        query = query.where(Dialog.conversation_type == 'm2c')
         # Фильтр по датам
         if start_date:
             adjusted_start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -487,7 +494,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         query = select(*select_fields).join(Employee, Dialog.employee_id == Employee.id).where(
             Employee.organization_id == organization_id
         )
-        
+        query = query.where(Dialog.conversation_type == 'm2c')
         # Фильтр по датам
         if start_date:
             adjusted_start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
