@@ -30,28 +30,27 @@ class LLMAnalyzer:
         self.prompt = None
 
 
-    def create_prompt(self) -> str:
-
-        """
-        Метод для генерации промта для модели
-
-        :return: возвращает промт
-        """
-
-        self.prompt = prompts.PROMPT_TO_EXTRACT_DIALOGS + self.context
-
-        return self.prompt
-
-
-    def request_model(self) -> int:
+    def request_model(self,
+                      context: str,
+                      prompt: str=prompts.PROMPT_TO_EXTRACT_DIALOGS,
+                      get_scores: bool=False) -> tuple[int, str]:
         """
         Метод отправки запроса
 
+        :param prompt: промт для генерации запроса
+        :param context: текст контекста
+        :param get_scores: запрос на получение оценок или разбиение на диалоги
         :return: возвращает ответ от модели в виде текста, либо код ошибки, если при запросе что-то случилось
         """
 
-        prompt = self.create_prompt()
-        self.split_dialogues = ""
+        self.prompt = prompt + context
+
+        if get_scores:
+            system_prompt = prompts.PROMPT_SYSTEM
+        else:
+            system_prompt = ''
+
+        result = ""
 
         while True:
             try:
@@ -59,14 +58,18 @@ class LLMAnalyzer:
                     model=self.model_type,
                     messages=[
                         {
+                            "role": "system",
+                            "content": system_prompt
+                        },
+                        {
                             "role": "user",
-                            "content": prompt
+                            "content": self.prompt
                         },
                     ]
                 )
 
-                self.split_dialogues = completion.choices[0].message.content
-                return 200
+                result = completion.choices[0].message.content
+                return 200, result
 
             except JSONDecodeError as e:
                 logger.info(
@@ -78,7 +81,7 @@ class LLMAnalyzer:
                 )
                 message = e.response.json()['error']['message']
                 if re.findall(r"Request too large for gpt-4o", message, re.DOTALL):
-                    return 429
+                    return 429, result
                 time_sleep = int(re.findall(r"Please try again in (\d+)", message, re.DOTALL)[0]) + 1
                 time.sleep(time_sleep)
 
@@ -144,13 +147,14 @@ class LLMAnalyzer:
         path_save_identified_dialogues = os.path.join(folder_w_dialogues, f'{chunk_name}_identified_dialogues.txt')
         if self.identified_dialogues:
 
-            with open(path_save_identified_dialogues, "w", encoding="utf-8") as f:
-                json.dump(self.identified_dialogues, f, ensure_ascii=False, indent=4)
-
             for dialog in self.identified_dialogues:
 
                 logger.info(f"Найден диалог типа {dialog.get('type')}")
                 logger.info(dialog)
+                dialog['chunk_name'] = chunk_name
+
+            with open(path_save_identified_dialogues, "w", encoding="utf-8") as f:
+                json.dump(self.identified_dialogues, f, ensure_ascii=False, indent=4)
 
         else:
             logger.info(
@@ -195,20 +199,21 @@ class LLMAnalyzer:
                     if not os.path.exists(path_result):
 
                         with open(path_transcription, "r", encoding="utf-8-sig") as f:
-                            self.context = f.read()
+                            context = f.read()
 
                         # проверяем длину текста, если она небольшая, то смысл отправлять на анализ модели нет
-                        if len(self.context) < settings.MIN_CONTENT_LENGTH:
+                        if len(context) < settings.MIN_CONTENT_LENGTH:
                             logger.info(
-                                f'Файл {path_transcription} слишком короткий ({len(self.context)} символов). Пропускаем.'
+                                f'Файл {path_transcription} слишком короткий ({len(context)} символов). Пропускаем.'
                             )
                             continue
 
-                        result = self.request_model()
+                        status, result = self.request_model(context=context)
+                        self.split_dialogues = result
 
-                        if result == 429:
+                        if status == 429:
                             logger.info(
-                                "Слишком длинный текст!"
+                                f"Слишком длинный текст: {self.context}"
                             )
                             continue
 
@@ -217,7 +222,13 @@ class LLMAnalyzer:
                             f.write(self.split_dialogues)
 
                         # выделяем диалоги определенных типов
-                        identified_dialogues = self.get_dialogues_by_type(folder_w_dialogues, chunk_name)
+                        _ = self.get_dialogues_by_type(folder_w_dialogues, chunk_name)
+                        status_get_scores = self.get_scores(folder_w_dialogues)
+
+                        if status_get_scores == 500:
+                            logger.info(
+                                f'Ошибка при попытке получить оценки для {path_transcription}!'
+                            )
 
                     else:
                         logger.info(
@@ -227,8 +238,76 @@ class LLMAnalyzer:
                     logger.info(
                         f'Транскрибта для {path_transcription} не существует!'
                     )
+
+            return
+
         except Exception as e:
             logger.error(
                 f'Ошибка при анализе транскрибций {e}'
             )
-            return 501
+            return 500
+
+    @staticmethod
+    def parse_scores(scores_dialog: str) -> dict[str, float]:
+
+        """
+        Парсит оценки из текста модели в словарь.
+        :param scores_dialog: текст с оценками диалога
+        :return: Возвращает {название критерия: оценка}.
+        """
+        pattern = r"### (.*?): ([0-9]+(?:[.,][0-9]+)?)/5"
+        scores = {}
+        for match in re.finditer(pattern, scores_dialog):
+            key = match.group(1).strip()
+            value = float(match.group(2).replace(",", "."))  # поддержка запятой и точки
+            scores[key] = value
+        return scores
+
+
+    def get_scores(self, folder_w_dialogues: str):
+
+        """
+        Метод для получения оценок от LLM, анализа качества общения персонала с клиентом
+
+        :param folder_w_dialogues: папка с блоками аудио
+        :return:
+        """
+
+        try:
+            for dialog in self.identified_dialogues:
+                chunk_name = dialog['chunk_name']
+                if dialog["type"] == "m2c":
+                    context = dialog["text"]
+                    status, scores_dialog = self.request_model(context=context,
+                                                               prompt=prompts.PROMPT_TO_SCORE_DIALOGS,
+                                                               get_scores=True)
+
+                    if status == 429:
+                        logger.info(
+                            f"Слишком длинный текст: {self.context}"
+                        )
+                        continue
+
+                    dialog["scores_dialog"] = scores_dialog
+                    logger.info(f"Диалог:\n{dialog['text']}")
+                    logger.info(f"Оценка диалога:\n{dialog['scores_dialog']}")
+                    dialog["scores"] = self.parse_scores(scores_dialog)
+                    logger.info(f"Оценки диалога:\n{dialog['scores']}")
+                else:
+                    dialog["scores_dialog"] = []
+                    dialog["scores"] = []
+
+            # chunk_name будет у всех одинаковый
+            path_save_scores_dialogues = os.path.join(folder_w_dialogues, f"{chunk_name}_scores_dialogues.txt")
+
+            with open(path_save_scores_dialogues, "w", encoding="utf-8") as f:
+                json.dump(self.identified_dialogues, f, ensure_ascii=False, indent=4)
+
+            return 200
+
+        except Exception as e:
+            logger.error(
+                f'Ошибка при попытке выставления оценки диалогу {e}'
+            )
+            return 500
+
