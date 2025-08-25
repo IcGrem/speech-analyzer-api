@@ -34,7 +34,7 @@ def main_audio_analyzer_function():
     llm_analyzer = LLMAnalyzer()
 
     all_rows_full_audio = db_connection.get_all_rows(AudioDataForAnalysis)
-    for row_full_audio in all_rows_full_audio[:1]:
+    for row_full_audio in all_rows_full_audio:
 
         # обновления поля в модели
         # db_connection.update_row(model=AudioDataForAnalysis,
@@ -42,14 +42,9 @@ def main_audio_analyzer_function():
         #                          filter_value=row_full_audio.id,
         #                          is_analyzed=True)
 
-        # employee_id = row_full_audio.employee_id
-        # получение сотрудника по id
-        # employee = db_connection.get_by_attribute(Employee, 'employee_id', employee_id)
-        # создание записи диалога, зная сотрудника и дневную запись
-        # db_connection.create_dialog(employee, row_full_audio)
 
         audio_name = row_full_audio.full_audio_filename
-        audio_name = '58393_2025-07-15_full.wav'
+        # audio_name = '58393_2025-07-15_full.wav'
         logger.info(f"Обработка аудио {audio_name}")
         audio_folder, _ = audio_name.split('_full')
         current_folder: str = os.path.join(main_folder_audio, audio_folder)
@@ -98,6 +93,13 @@ def main_audio_analyzer_function():
         logger.info(
             f"STAGE 3: Разделение блоков на диалоги, определение их типа с использованием LLM {folder_w_dialogues}!"
         )
+
+        # TODO передать пользователя и аудизапись
+        # employee_id = row_full_audio.employee_id
+        # получение сотрудника по id
+        # employee = db_connection.get_by_attribute(Employee, 'employee_id', employee_id)
+        # создание записи диалога, зная сотрудника и дневную запись
+        # db_connection.create_dialog(employee, row_full_audio)
         status_extract_dialogues = llm_analyzer.extract_dialogues(current_folder)
 
         if status_extract_dialogues == 500:

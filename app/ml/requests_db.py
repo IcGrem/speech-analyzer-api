@@ -68,7 +68,11 @@ class DBConnection:
         """
         Метод для создания записи с диалогом
 
+        :param employee: запись из таблицы сотрудников
+        :param audio_data_for_analysis: запись из таблицы с дневными аудио
+        :return:
         """
+        # TODO расширить метод или создать новый на создание диалога, фейковый оставить!!!
 
         # M2M = "m2m"  # manager to manager
         # M2C = "m2c"  # manager to customer

@@ -226,9 +226,18 @@ class LLMAnalyzer:
                         status_get_scores = self.get_scores(folder_w_dialogues)
 
                         if status_get_scores == 500:
-                            logger.info(
+                            logger.error(
                                 f'Ошибка при попытке получить оценки для {path_transcription}!'
                             )
+                            continue
+
+                        # TODO
+                        # список словарей с диалогами для сохранения с диалогами
+                        # self.identified_dialogues
+                        # TODO
+                        # тут записываем в базу
+                        # создание записи диалога, зная сотрудника и дневную запись
+                        # db_connection.create_dialog(employee, row_full_audio)
 
                     else:
                         logger.info(
