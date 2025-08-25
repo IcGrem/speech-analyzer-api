@@ -117,7 +117,7 @@ class DBConnection:
             return self.get_filtered_rows(
                 session,
                 models,
-                order_by="-creation_date",
+                order_by="-date",
                 date__gte=start_date,
                 date__lte=end_date,
             )
