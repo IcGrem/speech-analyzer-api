@@ -28,11 +28,16 @@ class TextExtractor:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
-        self.transcription_model = AutoModelForSpeechSeq2Seq.from_pretrained(self.name_transcription_model,
-                                                               torch_dtype=torch_dtype,
-                                                               low_cpu_mem_usage=False,
-                                                               use_safetensors=True,
-                                                               attn_implementation="sdpa").to(device)
+        self.transcription_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            self.name_transcription_model,
+            use_auth_token=settings.HF_TOKEN,
+            torch_dtype=torch_dtype,
+            low_cpu_mem_usage=False,
+            use_safetensors=True,
+            attn_implementation="sdpa"
+            ).to(
+                device
+            )
 
         processor = AutoProcessor.from_pretrained(self.name_transcription_model)
 
