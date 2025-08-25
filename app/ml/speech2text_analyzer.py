@@ -214,6 +214,7 @@ class TextExtractor:
 
             # пусть до папки с разделением после диаризации аудиофрагментами
             folder_w_diarization = os.path.join(current_folder, settings.FOLDER_W_DIARIZATION)
+            os.makedirs(folder_w_diarization, exist_ok=True)
             for chunk_name in chunks_names:
                 # путь до файла с транскрибцией
                 chunk_name, _ = chunk_name.split('.')
@@ -240,8 +241,8 @@ class TextExtractor:
 
             if cleaning:
                 cleaning_folder(folder_w_diarization)
-        except:
-            logger.error('Ошибка при Диаризации/Транскрибации')
+        except Exception as e:
+            logger.error(f'Ошибка при Диаризации/Транскрибации {e}')
             return 500
 
     def get_chunk_transcription(self, path_speaker_chunk: str):

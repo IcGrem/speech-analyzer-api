@@ -1,20 +1,12 @@
 import random
-import json
 import uuid
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-
-from app.db.session import async_session, get_db
-from app.crud.audio_data import audio_data_for_analysis_crud
-from app.core.config import settings
-from app.models.dialogs import AudioDataForAnalysis, Dialog, ConversationType, Phrase, Dictionary
-from app.models.users import Employee
+from app.models.dialogs import Dialog, ConversationType, Phrase, Dictionary
 from app.ml.utils import get_url_db
 
 class DBConnection:
