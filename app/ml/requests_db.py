@@ -52,12 +52,14 @@ class DBConnection:
         for filter_key, value in filters.items():
             if value is None:
                 continue
-
+                
+            # Разделяем ключ на поле и оператор
             parts = filter_key.split('__')
             field_name = parts[0]
             operator = 'eq' if len(parts) == 1 else parts[1]
 
             if not hasattr(models, field_name):
+                logger.warning(f"Поле {field_name} не найдено в модели {models}")
                 continue
 
             field = getattr(models, field_name)
@@ -65,10 +67,13 @@ class DBConnection:
             # Выбираем оператор
             if operator == 'gte':
                 query = query.where(field >= value)
+                logger.debug(f"Добавлено условие: {field} >= {value}")
             elif operator == 'lte':
                 query = query.where(field <= value)
+                logger.debug(f"Добавлено условие: {field} <= {value}")
             elif operator == 'eq':
                 query = query.where(field == value)
+                logger.debug(f"Добавлено условие: {field} == {value}")
             else:
                 raise ValueError(f"Неизвестный оператор: {operator}")
 
@@ -78,9 +83,17 @@ class DBConnection:
                 field_name = order_by[1:]
                 if hasattr(models, field_name):
                     query = query.order_by(getattr(models, field_name).desc())
+                    logger.debug(f"Добавлена сортировка по {field_name} DESC")
             else:
                 if hasattr(models, order_by):
                     query = query.order_by(getattr(models, order_by))
+                    logger.debug(f"Добавлена сортировка по {order_by} ASC")
+        
+        # Логируем итоговый SQL-запрос для отладки
+        try:
+            logger.debug(f"Итоговый SQL: {query.compile(bind=session.get_bind())}")
+        except:
+            logger.debug("Не удалось скомпилировать SQL для логирования")
         
         result = session.execute(query)
         return result.scalars().all()
@@ -93,15 +106,23 @@ class DBConnection:
     ):
         """Получить записи в диапазоне дат"""
         logger.info(f'Дата начала {start_date} Дата конца {end_date}')
+        
+        # Убедимся, что даты имеют правильный формат
+        if not isinstance(start_date, datetime) or not isinstance(end_date, datetime):
+            logger.error("Даты должны быть объектами datetime")
+            return []
+        
         session = self.session_local()
-        return self.get_filtered_rows(
-            session,
-            models,
-            order_by="-creation_date",
-            creation_date__gte=start_date,
-            creation_date__lte=end_date,
-
-        )
+        try:
+            return self.get_filtered_rows(
+                session,
+                models,
+                order_by="-creation_date",
+                creation_date__gte=start_date,
+                creation_date__lte=end_date,
+            )
+        finally:
+            session.close()
 
     def get_by_attribute(self, model, field_name: str, value):
         """
