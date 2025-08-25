@@ -9,6 +9,7 @@ from sqlalchemy.orm.attributes import InstrumentedAttribute
 
 from app.models.dialogs import Dialog, ConversationType, Phrase, Dictionary
 from app.ml.utils import get_url_db
+from app.ml.logger import logger
 
 class DBConnection:
 
@@ -70,6 +71,7 @@ class DBConnection:
         end_date: datetime
     ):
         """Получить записи в диапазоне дат"""
+        logger.info(f'Дата начала {start_date} Дата конца {end_date}')
         session = self.session_local()
         return self.get_filtered_rows(
             session,

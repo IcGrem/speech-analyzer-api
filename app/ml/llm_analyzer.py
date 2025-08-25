@@ -1,3 +1,4 @@
+import httpx
 import time
 import os
 import json
@@ -17,15 +18,18 @@ class LLMAnalyzer:
 
     def __init__(self):
         self.model_type = settings.OPENAI_MODEL_TYPE
-
+        transport = httpx.HTTPTransport(proxy=settings.PROXY_URL)
+        http_client = httpx.Client(transport=transport,
+            timeout=60.0,            
+            follow_redirects=True,
+            )        
         if not settings.USE_PROXY:
             self.client = OpenAI(api_key=settings.OPENAI_API_KEY,
                                  base_url=settings.OPENAI_BASE_URL)
         else:
             self.client = OpenAI(api_key=settings.OPENAI_API_KEY,
                                  base_url=settings.OPENAI_BASE_URL,
-                                 http_client=settings.PROXY_URL)
-
+                                 http_client=http_client)
         self.context = ""
         self.split_dialogues = ""
         self.identified_dialogues = list()
@@ -187,7 +191,7 @@ class LLMAnalyzer:
             "Время ответа": "response_time_score",
             "Итоговая оценка": "overall_score"
         }
-        
+
         try:
 
             folder_w_dialogues: str = os.path.join(current_folder, settings.FOLDER_W_DIALOGUES)
