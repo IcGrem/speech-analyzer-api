@@ -64,7 +64,12 @@ class TextExtractor:
 
         self.generate_kwargs = {"language": "ru"}
 
-        self.diarization_pipeline = Pipeline.from_pretrained(self.name_diarization_model).to(torch.device("cuda"))
+        self.diarization_pipeline = Pipeline.from_pretrained(
+            self.name_diarization_model,
+            use_auth_token=settings.HF_TOKEN
+            ).to(
+            torch.device("cuda")
+            )
 
         return
 
