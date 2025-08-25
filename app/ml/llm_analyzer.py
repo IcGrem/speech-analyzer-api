@@ -260,6 +260,7 @@ class LLMAnalyzer:
                     # создание записи диалога, зная сотрудника и дневную запись
                     
                     for dialog in self.identified_dialogues:
+                        logger.info(f'dialog - {dialog}')
                         record_start_date = datetime.fromisoformat(dialog['chunk_name'].split('_')[3])
                         metrics = {METRIC_NAMES[key]: value for key, value in dialog['scores'].items()}
                         data_for_save_to_db = {
