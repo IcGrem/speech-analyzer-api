@@ -214,3 +214,5 @@ instruments/
 speech_data/
 full_speech_data/
 .vscode/
+
+requirements_linux.txt

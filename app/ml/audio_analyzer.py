@@ -17,7 +17,12 @@ class AudioAnalyzer:
     def __init__(self):
         self.logger = logger
         self.vad_model = settings.VAD_MODEL
-        self.vad_pipeline = VoiceActivityDetection.from_pretrained(self.vad_model).to(torch.device("cuda"))
+        self.vad_pipeline = VoiceActivityDetection.from_pretrained(
+            self.vad_model,
+            use_auth_token=settings.HF_TOKEN
+            ).to(
+            torch.device("cuda")
+            )
 
     def vad_split_audio_into_dialogues(self,
                                        path_audio,

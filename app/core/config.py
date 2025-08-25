@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     LOGGER_FOLDER: str = os.path.join('app', 'ml', 'logs', 'main')
 
     # модели
+    HF_TOKEN: str = Field(default="", env="HF_TOKEN")
     VAD_MODEL: str = "pyannote/voice-activity-detection"
     TRANSCRIPTION_MODEL: str = "openai/whisper-large-v3"
     DIARIZATION_MODEL: str = "pyannote/speaker-diarization-3.1"
