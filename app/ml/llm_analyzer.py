@@ -274,7 +274,7 @@ class LLMAnalyzer:
                     for dialog in self.identified_dialogues:
                         logger.info(f'dialog - {dialog}')
                         record_start_date = datetime.fromisoformat(dialog['chunk_name'].split('_')[3])
-                        if type(dialog['scores'])==dict():
+                        if type(dialog['scores'])==dict:
                             metrics = {METRIC_NAMES[key]: value for key, value in dialog['scores'].items()}
                         else:
                             metrics = {METRIC_NAMES[key]: value for key, value in default_scores.items()}
