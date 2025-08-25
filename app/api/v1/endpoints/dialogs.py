@@ -110,8 +110,9 @@ async def get_audiodata_from_voca(
         )
 
 
-@router.get("/get-dialogs", response_model=PaginatedResponse, description="Получение списка диалогов с пагинацией и фильтрами")
+@router.get("/get-dialogs/{organization_id}", response_model=PaginatedResponse, description="Получение списка диалогов с пагинацией и фильтрами")
 async def get_dialogs(
+    organization_id: UUID,
     page: int = Query(1, ge=1, description="Номер страницы"),
     size: int = Query(10, ge=1, le=100, description="Количество записей на странице"),
     start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
@@ -144,6 +145,7 @@ async def get_dialogs(
     # Получаем данные с пагинацией
     result = await dialog_crud.get_dialogs_with_pagination(
         db=db,
+        organization_id=organization_id,
         page=page,
         size=size,
         start_date=start_date,

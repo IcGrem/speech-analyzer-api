@@ -517,6 +517,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     async def get_dialogs_with_pagination(
         self,
         db: AsyncSession,
+        organization_id: UUID,
         page: int = 1,
         size: int = 10,
         start_date: Optional[datetime] = None,
@@ -536,7 +537,9 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             Dialog.conversation_type,
             Employee.first_name,
             Employee.last_name
-        ).join(Employee, Dialog.employee_id == Employee.id)
+        ).join(Employee, Dialog.employee_id == Employee.id).where(
+            Employee.organization_id == organization_id
+        )
         
         # Применяем фильтры
         if start_date:
