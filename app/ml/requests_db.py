@@ -118,8 +118,8 @@ class DBConnection:
                 session,
                 models,
                 order_by="-creation_date",
-                creation_date__gte=start_date,
-                creation_date__lte=end_date,
+                date__gte=start_date,
+                date__lte=end_date,
             )
         finally:
             session.close()
