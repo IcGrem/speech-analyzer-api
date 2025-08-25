@@ -110,7 +110,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL_TYPE: str = "gpt-4o"
     OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
     # использовать прокси или нет
-    USE_PROXY: bool = False
+    USE_PROXY: bool = Field(default=False, env="USE_PROXY")
     PROXY_URL: str = Field(default="", env="PROXY_URL")
 
     # обработка текста
