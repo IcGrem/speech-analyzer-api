@@ -1,3 +1,4 @@
+from email.policy import default
 import httpx
 import time
 import os
@@ -192,6 +193,17 @@ class LLMAnalyzer:
             "Время ответа": "response_time_score",
             "Итоговая оценка": "overall_score"
         }
+        default_scores = {
+            "Приветствие и прощание": 0.0,
+            "Полнота ответа": 0.0,
+            "Тон общения": 0.0,
+            "Открытость и готовность помочь": 0.0,
+            "Умение слушать": 0.0,
+            "Эмпатия": 0.0,
+            "Грамотная речь": 0.0,
+            "Время ответа": 0.0,
+            "Итоговая оценка": 0.0
+        }
 
         # try:
 
@@ -262,7 +274,10 @@ class LLMAnalyzer:
                     for dialog in self.identified_dialogues:
                         logger.info(f'dialog - {dialog}')
                         record_start_date = datetime.fromisoformat(dialog['chunk_name'].split('_')[3])
-                        metrics = {METRIC_NAMES[key]: value for key, value in dialog['scores'].items()}
+                        if type(dialog['scores'])==dict():
+                            metrics = {METRIC_NAMES[key]: value for key, value in dialog['scores'].items()}
+                        else:
+                            metrics = {METRIC_NAMES[key]: value for key, value in default_scores.items()}
                         data_for_save_to_db = {
                             "employee_id": employee.id,
                             "conversation_type": dialog['type'],
