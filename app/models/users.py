@@ -15,6 +15,7 @@ class User(Base):
     __tablename__ = "users"
     
     username: Mapped[str] = mapped_column(unique=True, index=True, nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), nullable=True)
     first_name: Mapped[str] = mapped_column(nullable=True)
     last_name: Mapped[str] = mapped_column(nullable=True)
     middle_name: Mapped[str] = mapped_column(nullable=True)

@@ -20,6 +20,7 @@ class TokenData(BaseModel):
 class UserBase(BaseModel):
     """Базовая схема для пользователя"""
     username: str = Field(..., min_length=3, max_length=50, description="Username пользователя")
+    organization_id: UUID = Field(None, description="ID организации")
     first_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Имя пользователя")
     last_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Фамилия пользователя")
     middle_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Отчество пользователя")
@@ -36,6 +37,7 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     """Схема для обновления пользователя"""
     username: Optional[str] = Field(None, min_length=3, max_length=50, description="Username пользователя")
+    organization_id: UUID = Field(None, description="ID организации")
     first_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Имя пользователя")
     last_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Фамилия пользователя")
     middle_name: Optional[str] = Field(None, min_length=1, max_length=100, description="Отчество пользователя")
