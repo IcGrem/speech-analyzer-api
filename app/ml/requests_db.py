@@ -46,7 +46,7 @@ class DBConnection:
         Метод на получение отфильтрованных данных из конкретной таблицы
         """
         query = select(models)
-        
+        logger.info(f'Фильтры - {filters}')
         # Применяем фильтры
         for field, value in filters.items():
             if hasattr(models, field) and value is not None:
