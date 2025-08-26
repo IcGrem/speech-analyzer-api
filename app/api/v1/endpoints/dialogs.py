@@ -290,7 +290,7 @@ async def get_employee_metrics(
         employee_id = row.id
         employee_name = f"{row.first_name} {row.last_name}"
         date_str = row.date.strftime("%d-%m-%Y")
-        metric_value = float(row.avg_metric or 0.0)
+        metric_value = float(row.avg_metric or 0.01)
         
         all_dates.add(date_str)
         
@@ -311,7 +311,7 @@ async def get_employee_metrics(
     for employee_id, employee_info in employee_data.items():
         data = []
         for date_str in sorted_dates:
-            value = employee_info["data"].get(date_str, 0.0)
+            value = employee_info["data"].get(date_str, 0.01)
             data.append(round(value, 2))
         
         dataset = ChartDataset(
