@@ -273,7 +273,7 @@ async def get_employee_metrics(
         adjusted_end_date,
         parsed_employee_ids
     )
-    
+    logger.info(f'METRIC DATA - {metrics_data}')
     # Генерируем случайные цвета для каждого сотрудника
     colors = [
         "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
