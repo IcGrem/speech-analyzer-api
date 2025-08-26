@@ -162,8 +162,8 @@ if __name__ == '__main__':
     # Преобразование строк в объекты datetime
     start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
     if args.end_date:
-        end_date = datetime.strptime(args.end_date, '%Y-%m-%d')
+        end_date = datetime.strptime(args.end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, microsecond=999999)
     else:
-        end_date = start_date
+        end_date = start_date.replace(hour=23, minute=59, second=59, microsecond=999999)
     
     main_audio_analyzer_function(start_date, end_date)
