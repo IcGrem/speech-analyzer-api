@@ -12,13 +12,14 @@ from app.schemas.users import UserResponse
 router = APIRouter()
 
 
-@router.get("/get-employees", response_model=List[EmployeeResponse], description="Получение списка всех сотрудников")
+@router.get("/get-employees", response_model=List[EmployeeResponse], description="Получение списка всех сотрудников организации текущего пользователя")
 async def get_employees(
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
     db: AsyncSession = Depends(get_db)
 ) -> List[EmployeeResponse]:
-    """Получение списка всех сотрудников"""
-    return await employee_crud.get_all(db)
+    """Получение списка всех сотрудников организации текущего пользователя"""
+    organization_id = current_user.organization_id
+    return await employee_crud.get_by_organization(db, organization_id)
 
 
 @router.get("/get-employees-list", response_model=List[EmployeeList], description="Получение краткого списка сотрудников")
