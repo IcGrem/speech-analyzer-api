@@ -130,6 +130,10 @@ class Settings(BaseSettings):
     CLEANING_DIARIZATION_FOLDER: bool = False
     MIN_CONTENT_LENGTH: int = 100
 
+    # FFmpeg настройки
+    FFMPEG_PATH: str = Field(default="C:\\Program Files\\ffmpeg\\bin", env="FFMPEG_PATH")
+    FFMPEG_EXE: str = Field(default="C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe", env="FFMPEG_EXE")
+    FFMPEG_FFPROBE: str = Field(default="C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe", env="FFMPEG_FFPROBE")
 
     class Config:
         env_file = ".env"

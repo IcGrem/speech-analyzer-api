@@ -10,15 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from pydub import AudioSegment
 
-# Устанавливаем пути к ffmpeg для pydub
-import os
-os.environ["PATH"] = "C:\\Program Files\\ffmpeg\\bin;" + os.environ.get("PATH", "")
-
-AudioSegment.converter = "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe"
-AudioSegment.ffmpeg = "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe"
-AudioSegment.ffprobe = "C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe"
-
 from app.core.config import settings
+
 from app.core.logging import LoggerMixin
 from app.crud.audio_data import audio_data_crud, audio_data_for_analysis_crud
 from app.crud.users import employee_crud
@@ -32,6 +25,14 @@ try:
 except ImportError:
     MORPH = None
     MORPH_AVAILABLE = False
+
+# Устанавливаем пути к ffmpeg для pydub (только для Windows)
+if os.name == 'nt':  # Windows
+    os.environ["PATH"] = settings.FFMPEG_PATH + ";" + os.environ.get("PATH", "")
+
+    AudioSegment.converter = settings.FFMPEG_EXE
+    AudioSegment.ffmpeg = settings.FFMPEG_EXE
+    AudioSegment.ffprobe = settings.FFMPEG_FFPROBE
 
 
 def normalize_word(word: str) -> str:
