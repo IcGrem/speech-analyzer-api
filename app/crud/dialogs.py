@@ -595,7 +595,8 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         # Запрос для получения словарей для всех диалогов
         dictionaries_query = select(
             DialogDictionary.dialog_id,
-            Dictionary.description
+            Dictionary.description,
+            Dictionary.color
         ).join(
             Dictionary, DialogDictionary.dictionary_id == Dictionary.id
         ).where(
@@ -609,7 +610,10 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         for row in dictionaries_rows:
             if row.dialog_id not in dialog_dictionaries:
                 dialog_dictionaries[row.dialog_id] = []
-            dialog_dictionaries[row.dialog_id].append(row.description)
+            dialog_dictionaries[row.dialog_id].append({
+                'color': row.color,
+                'description': row.description
+            })
         
         # Формируем данные
         data = []
