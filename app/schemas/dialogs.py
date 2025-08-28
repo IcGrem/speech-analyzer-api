@@ -225,3 +225,11 @@ class DialogListItem(BaseModel):
     dictionaries: str = Field("", description="Строка с названиями словарей")
     
     model_config = ConfigDict(from_attributes=True)
+
+
+class DialogsByDictionariesResponse(BaseModel):
+    """Схема ответа для диалогов по названиям словарей"""
+    id: UUID
+    title: str
+    description: str
+    dialogs_count: int

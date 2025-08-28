@@ -16,6 +16,8 @@ from app.schemas.dialogs import (
     DialogUpdate, 
     DialogList,
     DialogWithEmployee,
+    DialogsByDictionariesListResponse,
+    DialogsByDictionariesResponse,
     EmployeeMetrics,
     OrganizationDailyMetrics,
     AudioDownloadRequest,
@@ -117,6 +119,8 @@ async def get_dialogs(
     size: int = Query(10, ge=1, le=100, description="Количество записей на странице"),
     start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
     end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
+    dictionary_id: Optional[UUID] = Query(None, description="ID словаря"),
+    conversation_type: Optional[ConversationType] = Query(None, description="Тип разговора (m2c, m2m)"),
     employee_ids: Optional[str] = Query(None, description="Список ID сотрудников через запятую"),
     sort_by: str = Query("recording_start_date", description="Поле для сортировки (recording_start_date, overall_score, employee_name)"),
     sort_order: str = Query("desc", description="Порядок сортировки (asc, desc)"),
@@ -150,6 +154,8 @@ async def get_dialogs(
         size=size,
         start_date=start_date,
         end_date=end_date,
+        dictionary_id=dictionary_id,
+        conversation_type=conversation_type,
         employee_ids=parsed_employee_ids,
         sort_by=sort_by,
         sort_order=sort_order.lower()
@@ -701,6 +707,20 @@ async def get_employee_average_metrics(
         labels=labels,
         datasets=datasets
     )
+
+
+# эндпоинт для получения количества диалогов в разрезе названий словарей из поля dictionaries диалога или свойства dictionaries_list
+@router.get("/get-dialogs-by-dictionaries", response_model=List[DialogsByDictionariesResponse], description="Получение диалогов по названиям словарей")
+async def get_dialogs_by_dictionaries(
+    employee_ids: Optional[str] = Query(None, description="Список ID сотрудников через запятую"),
+    start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
+    end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> List[DialogsByDictionariesResponse]:
+    """Получение диалогов по названиям словарей"""
+    organization_id = current_user.organization_id
+    return await dialog_crud.get_dialogs_by_dictionaries(db, organization_id, start_date, end_date, employee_ids)
 
 
 # @router.get("/get-dialogs-by-type/{conversation_type}", response_model=List[DialogList], description="Получение диалогов по типу разговора")

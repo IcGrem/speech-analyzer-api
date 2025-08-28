@@ -7,8 +7,9 @@ from sqlalchemy.orm import selectinload
 
 from app.crud.base import CRUDBase
 from app.models.users import Employee
-from app.models.dialogs import Dialog, ConversationType
+from app.models.dialogs import Dialog, ConversationType, DialogDictionary, Dictionary
 from app.schemas.dialogs import DialogCreate, DialogUpdate
+from app.core.logging import get_logger
 
 
 class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
@@ -513,7 +514,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         result = await db.execute(query)
         return result.fetchall()
 
-
+    
     async def get_dialogs_with_pagination(
         self,
         db: AsyncSession,
@@ -523,23 +524,34 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         employee_ids: Optional[List[UUID]] = None,
+        dictionary_id: Optional[UUID] = None,
+        conversation_type: Optional[ConversationType] = None,
         sort_by: str = "recording_start_date",
         sort_order: str = "desc"
     ) -> Dict[str, Any]:
         """Получить диалоги с пагинацией и фильтрами"""
         
-        # Базовый запрос с JOIN для получения имени сотрудника
+        # Базовый запрос для получения диалогов с фильтрами по организации, сотруднику и диапазону дат
         base_query = select(
             Dialog.id,
             Dialog.recording_start_date,
             Dialog.overall_score,
-            Dialog.dictionaries,
             Dialog.conversation_type,
             Employee.first_name,
             Employee.last_name
-        ).join(Employee, Dialog.employee_id == Employee.id).where(
+        ).join(
+            Employee, Dialog.employee_id == Employee.id
+        ).where(
             Employee.organization_id == organization_id
         )
+        
+        # Добавляем JOIN для фильтра по словарю, если он указан
+        if dictionary_id:
+            base_query = base_query.join(
+                DialogDictionary, Dialog.id == DialogDictionary.dialog_id
+            ).where(
+                DialogDictionary.dictionary_id == dictionary_id
+            )
         
         # Применяем фильтры
         if start_date:
@@ -548,6 +560,8 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             base_query = base_query.where(Dialog.recording_start_date <= end_date)
         if employee_ids:
             base_query = base_query.where(Employee.id.in_(employee_ids))
+        if conversation_type:
+            base_query = base_query.where(Dialog.conversation_type == conversation_type)
         
         # Запрос для подсчета общего количества
         count_query = select(func.count()).select_from(base_query.subquery())
@@ -575,17 +589,40 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         result = await db.execute(main_query)
         rows = result.fetchall()
         
+        # Получаем ID диалогов для запроса словарей
+        dialog_ids = [row.id for row in rows]
+        
+        # Запрос для получения словарей для всех диалогов
+        dictionaries_query = select(
+            DialogDictionary.dialog_id,
+            Dictionary.title
+        ).join(
+            Dictionary, DialogDictionary.dictionary_id == Dictionary.id
+        ).where(
+            DialogDictionary.dialog_id.in_(dialog_ids)
+        )
+        dictionaries_result = await db.execute(dictionaries_query)
+        dictionaries_rows = dictionaries_result.fetchall()
+        
+        # Группируем словари по dialog_id
+        dialog_dictionaries = {}
+        for row in dictionaries_rows:
+            if row.dialog_id not in dialog_dictionaries:
+                dialog_dictionaries[row.dialog_id] = []
+            dialog_dictionaries[row.dialog_id].append(row.title)
+        
         # Формируем данные
         data = []
         for row in rows:
             employee_name = f"{row.first_name} {row.last_name}"
+            dictionaries = dialog_dictionaries.get(row.id, [])
             data.append({
                 "date": row.recording_start_date,
                 "employee_name": employee_name,
                 "dialog_id": row.id,
                 "conversation_type": row.conversation_type,
                 "overall_score": float(row.overall_score) if row.overall_score is not None else None,
-                "dictionaries": row.dictionaries or ""
+                "dictionaries": dictionaries
             })
         
         return {
@@ -596,6 +633,46 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             "data": data
         }
 
+    async def get_dialogs_by_dictionaries(
+        self, 
+        db: AsyncSession, 
+        organization_id: UUID,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        employee_ids: Optional[List[UUID]] = None
+    ) -> List[Dict[str, Any]]:
+        """Получить количество диалогов по каждому словарю с фильтрами"""
+        
+        query = select(
+            Dictionary.id,
+            Dictionary.title,
+            Dictionary.description,
+            func.count(Dialog.id).label("dialogs_count")
+        ).join(
+            DialogDictionary, DialogDictionary.dictionary_id == Dictionary.id
+        ).join(
+            Dialog, DialogDictionary.dialog_id == Dialog.id
+        ).join(
+            Employee, Dialog.employee_id == Employee.id
+        ).where(
+            Employee.organization_id == organization_id,
+            Dialog.conversation_type == ConversationType.M2C
+        )
+        get_logger(__name__).info(f'QUERY - {query}')
+        # Применяем фильтры
+        if start_date:
+            query = query.where(Dialog.recording_start_date >= start_date)
+        if end_date:
+            query = query.where(Dialog.recording_start_date <= end_date)
+        if employee_ids:
+            query = query.where(Employee.id.in_(employee_ids))
+            
+        query = query.group_by(Dictionary.id, Dictionary.title)
+        query = query.order_by(func.count(Dialog.id).desc())
+        
+        result = await db.execute(query)
+        get_logger(__name__).info(f'RESULT - {result.fetchall()}')
+        return result.fetchall()
 
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog) 

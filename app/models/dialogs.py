@@ -26,7 +26,7 @@ class Dialog(Base):
     recording_end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     audio_data_id: Mapped[UUID] = mapped_column(ForeignKey("audio_data.id"), nullable=True)
     audio_data_for_analysis_id: Mapped[UUID] = mapped_column(ForeignKey("audio_data_for_analysis.id"), nullable=True)
-    dictionaries: Mapped[str] = mapped_column(String, nullable=True)
+    # dictionaries: Mapped[str] = mapped_column(String, nullable=True)
 
     # Метрики диалога
     greeting_farewell_score: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)  # Приветствие и прощание
@@ -41,6 +41,10 @@ class Dialog(Base):
     
     # Связь с сотрудником
     employee: Mapped["Employee"] = relationship("Employee", backref="dialogs")
+
+    # @property
+    # def dictionaries_list(self) -> List[str]:
+    #     return self.dictionaries.split(',') if self.dictionaries else []
 
 
 class AudioData(Base):
@@ -82,6 +86,7 @@ class Dictionary(Base):
 
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(String, nullable=True)
+    color: Mapped[str] = mapped_column(String, nullable=True)
     
     # phrases: Mapped[List["Phrase"]] = relationship("Phrase", backref="dictionary")
 
@@ -94,3 +99,13 @@ class Phrase(Base):
     normal_form: Mapped[str] = mapped_column(String, nullable=False)
 
     # dictionary: Mapped["Dictionary"] = relationship("Dictionary", backref="phrases")
+
+
+class DialogDictionary(Base):
+    __tablename__ = "dialog_dictionary"
+
+    dialog_id: Mapped[UUID] = mapped_column(ForeignKey("dialogs.id"), nullable=False)
+    dictionary_id: Mapped[UUID] = mapped_column(ForeignKey("dictionary.id"), nullable=False)
+
+#     # dialog: Mapped["Dialog"] = relationship("Dialog", backref="dialog_dictionaries")
+#     # dictionary: Mapped["Dictionary"] = relationship("Dictionary", backref="dialog_dictionaries")
