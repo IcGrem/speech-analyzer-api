@@ -16,7 +16,6 @@ from app.schemas.dialogs import (
     DialogUpdate, 
     DialogList,
     DialogWithEmployee,
-    DialogsByDictionariesListResponse,
     DialogsByDictionariesResponse,
     EmployeeMetrics,
     OrganizationDailyMetrics,
