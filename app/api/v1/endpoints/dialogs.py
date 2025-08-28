@@ -1,9 +1,9 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Security, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 import random
 
 from app.db.session import get_db
@@ -27,12 +27,16 @@ from app.schemas.dialogs import (
     MetricType,
     OrganizationAverageMetricsResponse,
     AverageMetricScore,
-    PaginatedResponse
+    PaginatedResponse,
+    DialogHighlightedResponse,
+    DialogDictionaryPopulateResponse,
+    DialogDictionaryPopulateAllResponse,
+    DialogDictionaryClearResponse
 )
 from app.schemas.audio_data import AudioDataList, AudioDataStats
 from app.schemas.users import UserResponse
 from app.services.dependencies import get_current_user
-from app.services.dialog_service import voca_service, audio_processor
+from app.services.dialog_service import voca_service, audio_processor, dialog_highlighter, dialog_dictionary_populator
 from app.core.exceptions import DialogNotFoundError
 from app.core.logging import get_logger
 
@@ -719,7 +723,17 @@ async def get_dialogs_by_dictionaries(
 ) -> List[DialogsByDictionariesResponse]:
     """Получение диалогов по названиям словарей"""
     organization_id = current_user.organization_id
-    return await dialog_crud.get_dialogs_by_dictionaries(db, organization_id, start_date, end_date, employee_ids)
+    
+    # Парсим employee_ids из строки
+    parsed_employee_ids = None
+    if employee_ids:
+        try:
+            parsed_employee_ids = [UUID(emp_id.strip()) for emp_id in employee_ids.split(',')]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат ID сотрудников")
+    
+    result = await dialog_crud.get_dialogs_by_dictionaries(db, organization_id, start_date, end_date, parsed_employee_ids)
+    return [DialogsByDictionariesResponse(**item) for item in result]
 
 
 # @router.get("/get-dialogs-by-type/{conversation_type}", response_model=List[DialogList], description="Получение диалогов по типу разговора")
@@ -863,4 +877,155 @@ async def process_audio_data_previous_day(
         raise HTTPException(
             status_code=500,
             detail=f"Ошибка при обработке аудиоданных: {str(e)}"
+        )
+
+
+@router.get("/get-dialog-highlighted/{dialog_id}", response_model=DialogHighlightedResponse, description="Получение диалога с подсвеченными словами из словарей")
+async def get_dialog_highlighted(
+    dialog_id: UUID,
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> DialogHighlightedResponse:
+    """Получение диалога с подсвеченными словами из словарей"""
+    try:
+        # Получаем оригинальный диалог
+        dialog = await dialog_crud.get(db, dialog_id)
+        if not dialog:
+            raise DialogNotFoundError()
+        
+        # Подсвечиваем текст
+        highlighted_text = await dialog_highlighter.highlight_dialog_text(db, dialog_id)
+        
+        if highlighted_text is None:
+            # Если подсветка не удалась, возвращаем оригинальный текст
+            highlighted_text = dialog.conversation
+        
+        # Проверяем, был ли диалог обновлен в БД (есть ли HTML разметка)
+        was_updated = highlighted_text != dialog.conversation and '<span' in highlighted_text
+        
+        return DialogHighlightedResponse(
+            dialog_id=dialog_id,
+            original_text=dialog.conversation,
+            highlighted_text=highlighted_text,
+            conversation_type=dialog.conversation_type,
+            filename=dialog.filename,
+            recording_start_date=dialog.recording_start_date,
+            recording_end_date=dialog.recording_end_date,
+            was_updated_in_db=was_updated
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении подсвеченного диалога {dialog_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении подсвеченного диалога: {str(e)}"
+        )
+
+
+@router.post("/highlight-all-dialogs", description="Подсветка всех диалогов организации")
+async def highlight_all_dialogs(
+    organization_id: Optional[UUID] = Query(None, description="ID организации (если не указан, используется организация текущего пользователя)"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Подсветка всех диалогов организации"""
+    try:
+        # Если organization_id не указан, используем организацию текущего пользователя
+        if organization_id is None:
+            organization_id = current_user.organization_id
+        
+        logger.info(f"Запуск подсветки диалогов для организации {organization_id}")
+        
+        # Подсвечиваем все диалоги
+        highlighted_dialogs = await dialog_highlighter.highlight_all_dialogs(db, organization_id)
+        
+        # Подсчитываем количество диалогов с найденными фразами (которые были обновлены)
+        updated_count = sum(1 for text in highlighted_dialogs.values() if '<span' in text)
+        
+        return {
+            "success": True,
+            "message": f"Подсвечено {len(highlighted_dialogs)} диалогов, обновлено в БД: {updated_count}",
+            "highlighted_count": len(highlighted_dialogs),
+            "updated_in_db_count": updated_count,
+            "organization_id": organization_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка при подсветке диалогов: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при подсветке диалогов: {str(e)}"
+        )
+
+
+@router.post("/populate-dialog-dictionary/{dialog_id}", response_model=DialogDictionaryPopulateResponse, description="Заполнить таблицу dialog_dictionary для конкретного диалога")
+async def populate_dialog_dictionary(
+    dialog_id: UUID,
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> DialogDictionaryPopulateResponse:
+    """Заполнить таблицу dialog_dictionary для конкретного диалога"""
+    try:
+        logger.info(f"Запуск заполнения словарей для диалога {dialog_id}")
+        
+        # Заполняем словари для диалога
+        result = await dialog_dictionary_populator.populate_dialog_dictionary(db, dialog_id)
+        
+        return DialogDictionaryPopulateResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при заполнении словарей для диалога {dialog_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при заполнении словарей: {str(e)}"
+        )
+
+
+@router.post("/populate-all-dialogs-dictionaries", response_model=DialogDictionaryPopulateAllResponse, description="Заполнить таблицу dialog_dictionary для всех диалогов организации")
+async def populate_all_dialogs_dictionaries(
+    organization_id: Optional[UUID] = Query(None, description="ID организации (если не указан, используется организация текущего пользователя)"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> DialogDictionaryPopulateAllResponse:
+    """Заполнить таблицу dialog_dictionary для всех диалогов организации"""
+    try:
+        # Если organization_id не указан, используем организацию текущего пользователя
+        if organization_id is None:
+            organization_id = current_user.organization_id
+        
+        logger.info(f"Запуск заполнения словарей для организации {organization_id}")
+        
+        # Заполняем словари для всех диалогов
+        result = await dialog_dictionary_populator.populate_all_dialogs_dictionaries(db, organization_id)
+        
+        return DialogDictionaryPopulateAllResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при заполнении словарей для всех диалогов: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при заполнении словарей: {str(e)}"
+        )
+
+
+@router.delete("/clear-dialog-dictionaries", response_model=DialogDictionaryClearResponse, description="Очистить связи диалогов со словарями")
+async def clear_dialog_dictionaries(
+    dialog_id: Optional[UUID] = Query(None, description="ID диалога (если не указан, очищаются все связи)"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin']),
+    db: AsyncSession = Depends(get_db)
+) -> DialogDictionaryClearResponse:
+    """Очистить связи диалогов со словарями"""
+    try:
+        logger.info(f"Запуск очистки связей диалогов со словарями, dialog_id={dialog_id}")
+        
+        # Очищаем связи
+        result = await dialog_dictionary_populator.clear_dialog_dictionaries(db, dialog_id)
+        
+        return DialogDictionaryClearResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при очистке связей диалогов со словарями: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при очистке связей: {str(e)}"
         )

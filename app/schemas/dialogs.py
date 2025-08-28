@@ -232,4 +232,44 @@ class DialogsByDictionariesResponse(BaseModel):
     id: UUID
     title: str
     description: str
+    color: str
     dialogs_count: int
+
+
+class DialogDictionaryPopulateResponse(BaseModel):
+    """Схема ответа для заполнения словарей диалога"""
+    success: bool = Field(..., description="Успешность операции")
+    message: str = Field(..., description="Сообщение о результате")
+    added_count: int = Field(..., description="Количество добавленных связей")
+    total_found: Optional[int] = Field(None, description="Общее количество найденных словарей")
+    found_phrases_count: Optional[int] = Field(None, description="Количество найденных фраз")
+
+
+class DialogDictionaryPopulateAllResponse(BaseModel):
+    """Схема ответа для заполнения словарей всех диалогов"""
+    success: bool = Field(..., description="Успешность операции")
+    message: str = Field(..., description="Сообщение о результате")
+    processed_count: int = Field(..., description="Количество обработанных диалогов")
+    total_added: int = Field(..., description="Общее количество добавленных связей")
+    errors: Optional[List[str]] = Field(None, description="Список ошибок")
+
+
+class DialogDictionaryClearResponse(BaseModel):
+    """Схема ответа для очистки связей диалогов со словарями"""
+    success: bool = Field(..., description="Успешность операции")
+    message: str = Field(..., description="Сообщение о результате")
+    deleted_count: int = Field(..., description="Количество удаленных связей")
+
+
+class DialogHighlightedResponse(BaseModel):
+    """Схема ответа для диалога с подсвеченным текстом"""
+    dialog_id: UUID = Field(..., description="ID диалога")
+    original_text: str = Field(..., description="Оригинальный текст диалога")
+    highlighted_text: str = Field(..., description="Текст диалога с подсвеченными словами")
+    conversation_type: ConversationType = Field(..., description="Тип разговора")
+    filename: str = Field(..., description="Имя файла")
+    recording_start_date: datetime = Field(..., description="Дата начала записи")
+    recording_end_date: datetime = Field(..., description="Дата окончания записи")
+    was_updated_in_db: bool = Field(False, description="Был ли диалог обновлен в базе данных")
+    
+    model_config = ConfigDict(from_attributes=True)

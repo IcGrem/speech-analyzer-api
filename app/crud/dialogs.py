@@ -595,7 +595,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         # Запрос для получения словарей для всех диалогов
         dictionaries_query = select(
             DialogDictionary.dialog_id,
-            Dictionary.title
+            Dictionary.description
         ).join(
             Dictionary, DialogDictionary.dictionary_id == Dictionary.id
         ).where(
@@ -609,7 +609,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         for row in dictionaries_rows:
             if row.dialog_id not in dialog_dictionaries:
                 dialog_dictionaries[row.dialog_id] = []
-            dialog_dictionaries[row.dialog_id].append(row.title)
+            dialog_dictionaries[row.dialog_id].append(row.description)
         
         # Формируем данные
         data = []
@@ -647,6 +647,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             Dictionary.id,
             Dictionary.title,
             Dictionary.description,
+            Dictionary.color,
             func.count(Dialog.id).label("dialogs_count")
         ).join(
             DialogDictionary, DialogDictionary.dictionary_id == Dictionary.id
@@ -667,12 +668,24 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         if employee_ids:
             query = query.where(Employee.id.in_(employee_ids))
             
-        query = query.group_by(Dictionary.id, Dictionary.title)
+        query = query.group_by(Dictionary.id, Dictionary.title, Dictionary.description, Dictionary.color)
         query = query.order_by(func.count(Dialog.id).desc())
         
         result = await db.execute(query)
-        get_logger(__name__).info(f'RESULT - {result.fetchall()}')
-        return result.fetchall()
+        rows = result.fetchall()
+        get_logger(__name__).info(f'RESULT - {rows}')
+        
+        # Преобразуем результат в список словарей
+        return [
+            {
+                "id": row.id,
+                "title": row.title,
+                "description": row.description,
+                "color": row.color,
+                "dialogs_count": row.dialogs_count
+            }
+            for row in rows
+        ]
 
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog) 

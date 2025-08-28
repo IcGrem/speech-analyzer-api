@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 import aiohttp
 import aiofiles
@@ -24,6 +24,122 @@ from app.crud.audio_data import audio_data_crud, audio_data_for_analysis_crud
 from app.crud.users import employee_crud
 from app.schemas.users import EmployeeCreate
 
+# Импорт для морфологического анализа
+try:
+    from natasha import MorphVocab
+    MORPH = MorphVocab()
+    MORPH_AVAILABLE = True
+except ImportError:
+    MORPH = None
+    MORPH_AVAILABLE = False
+
+
+def normalize_word(word: str) -> str:
+    """Приводит слово к нормальной форме (инфинитив)"""
+    if not word:
+        return word
+    
+    word_lower = word.lower()
+    
+    # Словарь исключений для правильной нормализации
+    exceptions = {
+        'есть': 'быть',
+        'интересует': 'интересовать',
+        'интересуют': 'интересовать',
+        'информацию': 'информация',
+        'объясню': 'объяснить',
+        'помог': 'помочь',
+        'помогу': 'помочь',
+        'поможем': 'помочь',
+        'поможете': 'помочь',
+        'помогут': 'помочь'
+    }
+    
+    # Проверяем исключения
+    if word_lower in exceptions:
+        return exceptions[word_lower]
+    
+    # Простая нормализация для русских глаголов
+    if word_lower.endswith('л') or word_lower.endswith('ла') or word_lower.endswith('ло') or word_lower.endswith('ли'):
+        # Прошедшее время -> инфинитив
+        base = word_lower[:-1] if word_lower.endswith('л') else word_lower[:-2]
+        return base + 'ть'
+    elif word_lower.endswith('ю') or word_lower.endswith('ешь') or word_lower.endswith('ет') or word_lower.endswith('ем') or word_lower.endswith('ете') or word_lower.endswith('ют'):
+        # Личные формы -> инфинитив
+        base = word_lower[:-1] if word_lower.endswith('ю') else word_lower[:-2]
+        return base + 'ть'
+    elif word_lower.endswith('ющий') or word_lower.endswith('ющая') or word_lower.endswith('ющее') or word_lower.endswith('ющие'):
+        # Причастие -> инфинитив
+        base = word_lower[:-3] if word_lower.endswith('щий') or word_lower.endswith('щая') or word_lower.endswith('щее') or word_lower.endswith('щие') else word_lower[:-4]
+        return base + 'ть'
+    
+    return word_lower
+
+
+def get_word_forms(word: str) -> Set[str]:
+    """Получает все возможные формы слова"""
+    if not word:
+        return {word}
+    
+    forms = {word.lower()}
+    word_lower = word.lower()
+    
+    # Для глаголов добавляем основные формы
+    if word_lower.endswith('ть'):
+        # Инфинитив -> личные формы
+        base = word_lower[:-2]
+        forms.update([
+            base + 'ю', base + 'ешь', base + 'ет', base + 'ем', base + 'ете', base + 'ют',
+            base + 'л', base + 'ла', base + 'ло', base + 'ли',
+            base + 'ющий', base + 'ющая', base + 'ющее', base + 'ющие'
+        ])
+    elif word_lower.endswith('л') or word_lower.endswith('ла') or word_lower.endswith('ло') or word_lower.endswith('ли'):
+        # Прошедшее время -> инфинитив и другие формы
+        base = word_lower[:-1] if word_lower.endswith('л') else word_lower[:-2]
+        infinitive = base + 'ть'
+        forms.add(infinitive)
+        forms.update([
+            base + 'ю', base + 'ешь', base + 'ет', base + 'ем', base + 'ете', base + 'ют',
+            base + 'ющий', base + 'ющая', base + 'ющее', base + 'ющие'
+        ])
+    elif word_lower.endswith('ю') or word_lower.endswith('ешь') or word_lower.endswith('ет') or word_lower.endswith('ем') or word_lower.endswith('ете') or word_lower.endswith('ют'):
+        # Личные формы -> инфинитив и другие формы
+        base = word_lower[:-1] if word_lower.endswith('ю') else word_lower[:-2]
+        infinitive = base + 'ть'
+        forms.add(infinitive)
+        forms.update([
+            base + 'л', base + 'ла', base + 'ло', base + 'ли',
+            base + 'ющий', base + 'ющая', base + 'ющее', base + 'ющие'
+        ])
+    
+    return forms
+
+
+def extract_words_from_text(text: str) -> List[Dict[str, Any]]:
+    """Извлекает слова из текста с их позициями и нормальными формами"""
+    import re
+    
+    if not text:
+        return []
+    
+    # Разбиваем текст на слова, сохраняя позиции
+    words = []
+    word_pattern = re.compile(r'\b\w+\b', re.UNICODE)
+    
+    for match in word_pattern.finditer(text):
+        word = match.group()
+        start_pos = match.start()
+        end_pos = match.end()
+        
+        words.append({
+            'word': word,
+            'normal_form': normalize_word(word),
+            'start_pos': start_pos,
+            'end_pos': end_pos,
+            'word_forms': get_word_forms(word)
+        })
+    
+    return words
 
 
 class VocaAPIService(LoggerMixin):
@@ -654,3 +770,673 @@ class AudioDataProcessor(LoggerMixin):
 
 # Создаем экземпляр процессора аудиоданных
 audio_processor = AudioDataProcessor()
+
+
+class DialogTextHighlighter(LoggerMixin):
+    """Сервис для подсветки слов в тексте диалогов на основе словарей"""
+    
+    def __init__(self):
+        self._phrase_cache = None
+        self._dictionary_cache = None
+    
+    async def _load_phrases_and_dictionaries(self, db: AsyncSession) -> Dict[str, Dict[str, Any]]:
+        """Загружает все фразы и словари в кэш с поддержкой однокоренных слов"""
+        if self._phrase_cache is not None:
+            return self._phrase_cache
+        
+        from app.models.dialogs import Phrase, Dictionary
+        from sqlalchemy import select
+        
+        # Загружаем все фразы с их словарями
+        query = select(
+            Phrase.phrase,
+            Phrase.normal_form,
+            Dictionary.id,
+            Dictionary.title,
+            Dictionary.color
+        ).join(Dictionary, Phrase.dictionary_id == Dictionary.id)
+        
+        result = await db.execute(query)
+        rows = result.fetchall()
+        
+        # Создаем кэш: {phrase: {dictionary_id, title, color, normal_form, word_forms}}
+        phrase_cache = {}
+        for row in rows:
+            # Получаем все формы слова для поиска однокоренных слов
+            word_forms = get_word_forms(row.phrase)
+            normal_form = row.normal_form or normalize_word(row.phrase)
+            
+            phrase_info = {
+                'dictionary_id': row.id,
+                'title': row.title,
+                'color': row.color or '#000000',
+                'normal_form': normal_form,
+                'word_forms': word_forms
+            }
+            
+            # Добавляем оригинальную фразу
+            phrase_cache[row.phrase] = phrase_info
+            
+            # Добавляем нормализованную форму
+            phrase_cache[normal_form] = phrase_info
+            
+            # Добавляем все формы слова
+            for form in word_forms:
+                phrase_cache[form] = phrase_info
+        
+        self._phrase_cache = phrase_cache
+        return phrase_cache
+    
+    def _find_phrases_in_text(self, text: str, phrase_cache: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Находит все фразы из словарей в тексте с поддержкой однокоренных слов"""
+        import re
+        
+        found_phrases = []
+        text_lower = text.lower()
+        
+        # Извлекаем слова из текста с их нормальными формами
+        text_words = extract_words_from_text(text)
+        
+        # Создаем словарь для быстрого поиска по нормальным формам
+        text_normal_forms = {}
+        for word_info in text_words:
+            text_normal_forms[word_info['normal_form']] = word_info
+            # Также добавляем все формы слова
+            for form in word_info['word_forms']:
+                text_normal_forms[form] = word_info
+        
+        # Сортируем фразы по длине (от длинных к коротким), чтобы избежать частичных совпадений
+        sorted_phrases = sorted(phrase_cache.keys(), key=len, reverse=True)
+        
+        for phrase in sorted_phrases:
+            phrase_lower = phrase.lower()
+            phrase_info = phrase_cache[phrase]
+            
+            # Проверяем точное совпадение
+            if phrase_lower in text_normal_forms:
+                word_info = text_normal_forms[phrase_lower]
+                found_phrases.append({
+                    'phrase': word_info['word'],
+                    'start_pos': word_info['start_pos'],
+                    'end_pos': word_info['end_pos'],
+                    'dictionary_info': phrase_info
+                })
+                continue
+            
+            # Проверяем совпадение по нормальной форме
+            if phrase_info['normal_form'] in text_normal_forms:
+                word_info = text_normal_forms[phrase_info['normal_form']]
+                found_phrases.append({
+                    'phrase': word_info['word'],
+                    'start_pos': word_info['start_pos'],
+                    'end_pos': word_info['end_pos'],
+                    'dictionary_info': phrase_info
+                })
+                continue
+            
+            # Проверяем совпадение по формам слова
+            for form in phrase_info['word_forms']:
+                if form in text_normal_forms:
+                    word_info = text_normal_forms[form]
+                    found_phrases.append({
+                        'phrase': word_info['word'],
+                        'start_pos': word_info['start_pos'],
+                        'end_pos': word_info['end_pos'],
+                        'dictionary_info': phrase_info
+                    })
+                    break
+        
+        # Сортируем по позиции в тексте
+        found_phrases.sort(key=lambda x: x['start_pos'])
+        
+        # Удаляем перекрывающиеся фразы (оставляем самые длинные)
+        filtered_phrases = []
+        for phrase_info in found_phrases:
+            is_overlapping = False
+            for existing_phrase in filtered_phrases:
+                if (phrase_info['start_pos'] < existing_phrase['end_pos'] and 
+                    phrase_info['end_pos'] > existing_phrase['start_pos']):
+                    is_overlapping = True
+                    break
+            
+            if not is_overlapping:
+                filtered_phrases.append(phrase_info)
+        
+        return filtered_phrases
+    
+    def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
+        """Проверяет, что найденная фраза является отдельным словом/фразой"""
+        import re
+        
+        # Определяем границы слова
+        word_boundary_pattern = r'\b'
+        
+        # Проверяем начало
+        if start_pos > 0:
+            before_text = text[:start_pos]
+            if not re.search(r'\W$', before_text) and not re.search(r'\s$', before_text):
+                return False
+        
+        # Проверяем конец
+        if end_pos < len(text):
+            after_text = text[end_pos:]
+            if not re.search(r'^\W', after_text) and not re.search(r'^\s', after_text):
+                return False
+        
+        return True
+    
+    def _highlight_text_with_phrases(self, text: str, found_phrases: List[Dict[str, Any]]) -> str:
+        """Подсвечивает найденные фразы в тексте HTML-тегами"""
+        if not found_phrases:
+            return text
+        
+        # Создаем список изменений (позиция, тип, данные)
+        changes = []
+        
+        for phrase_info in found_phrases:
+            # Добавляем открывающий тег
+            changes.append({
+                'pos': phrase_info['start_pos'],
+                'type': 'open',
+                'data': phrase_info
+            })
+            # Добавляем закрывающий тег
+            changes.append({
+                'pos': phrase_info['end_pos'],
+                'type': 'close',
+                'data': phrase_info
+            })
+        
+        # Сортируем изменения по позиции
+        changes.sort(key=lambda x: x['pos'])
+        
+        # Применяем изменения к тексту
+        result = ""
+        last_pos = 0
+        
+        for change in changes:
+            # Добавляем текст до изменения
+            result += text[last_pos:change['pos']]
+            
+            if change['type'] == 'open':
+                # Добавляем открывающий тег с цветом
+                color = change['data']['dictionary_info']['color']
+                title = change['data']['dictionary_info']['title']
+                result += f'<span style="background-color: {color}; color: white; padding: 1px 3px; border-radius: 3px;" title="{title}">'
+            else:
+                # Добавляем закрывающий тег
+                result += '</span>'
+            
+            last_pos = change['pos']
+        
+        # Добавляем оставшийся текст
+        result += text[last_pos:]
+        
+        return result
+    
+    async def highlight_dialog_text(self, db: AsyncSession, dialog_id: UUID) -> Optional[str]:
+        """Подсвечивает текст диалога найденными фразами из словарей и обновляет его в БД"""
+        try:
+            from app.models.dialogs import Dialog
+            from sqlalchemy import select, update
+            
+            # Получаем диалог
+            query = select(Dialog).where(Dialog.id == dialog_id)
+            result = await db.execute(query)
+            dialog = result.scalar_one_or_none()
+            
+            if not dialog:
+                self.logger.warning(f"Диалог с ID {dialog_id} не найден")
+                return None
+            
+            # Загружаем фразы и словари
+            phrase_cache = await self._load_phrases_and_dictionaries(db)
+            
+            # Находим фразы в тексте
+            found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
+            
+            if not found_phrases:
+                self.logger.info(f"В диалоге {dialog_id} не найдено фраз из словарей")
+                return dialog.conversation
+            
+            # Подсвечиваем текст
+            highlighted_text = self._highlight_text_with_phrases(dialog.conversation, found_phrases)
+            
+            # Обновляем запись в БД
+            stmt = update(Dialog).where(Dialog.id == dialog_id).values(conversation=highlighted_text)
+            await db.execute(stmt)
+            await db.commit()
+            
+            self.logger.info(f"В диалоге {dialog_id} найдено и подсвечено {len(found_phrases)} фраз, обновлено в БД")
+            
+            return highlighted_text
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при подсветке текста диалога {dialog_id}: {e}")
+            await db.rollback()
+            return None
+    
+    async def highlight_all_dialogs(self, db: AsyncSession, organization_id: Optional[UUID] = None) -> Dict[UUID, str]:
+        """Подсвечивает текст всех диалогов организации и обновляет их в БД"""
+        try:
+            from app.models.dialogs import Dialog
+            from app.models.users import Employee
+            from sqlalchemy import select, update
+            
+            # Формируем запрос
+            query = select(Dialog.id, Dialog.conversation).join(Employee, Dialog.employee_id == Employee.id)
+            
+            if organization_id:
+                query = query.where(Employee.organization_id == organization_id)
+            
+            result = await db.execute(query)
+            dialogs = result.fetchall()
+            
+            if not dialogs:
+                self.logger.info("Не найдено диалогов для подсветки")
+                return {}
+            
+            # Загружаем фразы и словари
+            phrase_cache = await self._load_phrases_and_dictionaries(db)
+            
+            highlighted_dialogs = {}
+            updated_count = 0
+            
+            for dialog in dialogs:
+                try:
+                    # Находим фразы в тексте
+                    found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
+                    
+                    if found_phrases:
+                        # Подсвечиваем текст
+                        highlighted_text = self._highlight_text_with_phrases(dialog.conversation, found_phrases)
+                        highlighted_dialogs[dialog.id] = highlighted_text
+                        
+                        # Обновляем запись в БД
+                        stmt = update(Dialog).where(Dialog.id == dialog.id).values(conversation=highlighted_text)
+                        await db.execute(stmt)
+                        updated_count += 1
+                        
+                        self.logger.info(f"В диалоге {dialog.id} найдено и подсвечено {len(found_phrases)} фраз")
+                    else:
+                        # Если фразы не найдены, возвращаем оригинальный текст
+                        highlighted_dialogs[dialog.id] = dialog.conversation
+                        
+                except Exception as e:
+                    self.logger.error(f"Ошибка при подсветке диалога {dialog.id}: {e}")
+                    # В случае ошибки возвращаем оригинальный текст
+                    highlighted_dialogs[dialog.id] = dialog.conversation
+            
+            # Коммитим все изменения
+            await db.commit()
+            
+            self.logger.info(f"Подсвечено {len(highlighted_dialogs)} диалогов, обновлено в БД: {updated_count}")
+            return highlighted_dialogs
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при подсветке всех диалогов: {e}")
+            # Откатываем изменения в случае ошибки
+            await db.rollback()
+            return {}
+    
+    def clear_cache(self):
+        """Очищает кэш фраз и словарей"""
+        self._phrase_cache = None
+        self._dictionary_cache = None
+
+
+# Создаем экземпляр сервиса подсветки
+dialog_highlighter = DialogTextHighlighter()
+
+
+class DialogDictionaryPopulator(LoggerMixin):
+    """Сервис для заполнения таблицы dialog_dictionary на основе найденных слов в диалогах"""
+    
+    def __init__(self):
+        self._phrase_cache = None
+    
+    async def _load_phrases_and_dictionaries(self, db: AsyncSession) -> Dict[str, Dict[str, Any]]:
+        """Загружает все фразы и словари в кэш с поддержкой однокоренных слов"""
+        if self._phrase_cache is not None:
+            return self._phrase_cache
+        
+        from app.models.dialogs import Phrase, Dictionary
+        from sqlalchemy import select
+        
+        # Загружаем все фразы с их словарями
+        query = select(
+            Phrase.phrase,
+            Phrase.normal_form,
+            Dictionary.id,
+            Dictionary.title,
+            Dictionary.color
+        ).join(Dictionary, Phrase.dictionary_id == Dictionary.id)
+        
+        result = await db.execute(query)
+        rows = result.fetchall()
+        
+        # Создаем кэш: {phrase: {dictionary_id, title, color, normal_form, word_forms}}
+        phrase_cache = {}
+        for row in rows:
+            # Получаем все формы слова для поиска однокоренных слов
+            word_forms = get_word_forms(row.phrase)
+            normal_form = row.normal_form or normalize_word(row.phrase)
+            
+            phrase_info = {
+                'dictionary_id': row.id,
+                'title': row.title,
+                'color': row.color or '#000000',
+                'normal_form': normal_form,
+                'word_forms': word_forms
+            }
+            
+            # Добавляем оригинальную фразу
+            phrase_cache[row.phrase] = phrase_info
+            
+            # Добавляем нормализованную форму
+            phrase_cache[normal_form] = phrase_info
+            
+            # Добавляем все формы слова
+            for form in word_forms:
+                phrase_cache[form] = phrase_info
+        
+        self._phrase_cache = phrase_cache
+        return phrase_cache
+    
+    def _find_phrases_in_text(self, text: str, phrase_cache: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Находит все фразы из словарей в тексте с поддержкой однокоренных слов"""
+        import re
+        
+        found_phrases = []
+        text_lower = text.lower()
+        
+        # Извлекаем слова из текста с их нормальными формами
+        text_words = extract_words_from_text(text)
+        
+        # Создаем словарь для быстрого поиска по нормальным формам
+        text_normal_forms = {}
+        for word_info in text_words:
+            text_normal_forms[word_info['normal_form']] = word_info
+            # Также добавляем все формы слова
+            for form in word_info['word_forms']:
+                text_normal_forms[form] = word_info
+        
+        # Сортируем фразы по длине (от длинных к коротким), чтобы избежать частичных совпадений
+        sorted_phrases = sorted(phrase_cache.keys(), key=len, reverse=True)
+        
+        for phrase in sorted_phrases:
+            phrase_lower = phrase.lower()
+            phrase_info = phrase_cache[phrase]
+            
+            # Проверяем точное совпадение
+            if phrase_lower in text_normal_forms:
+                word_info = text_normal_forms[phrase_lower]
+                found_phrases.append({
+                    'phrase': word_info['word'],
+                    'start_pos': word_info['start_pos'],
+                    'end_pos': word_info['end_pos'],
+                    'dictionary_info': phrase_info
+                })
+                continue
+            
+            # Проверяем совпадение по нормальной форме
+            if phrase_info['normal_form'] in text_normal_forms:
+                word_info = text_normal_forms[phrase_info['normal_form']]
+                found_phrases.append({
+                    'phrase': word_info['word'],
+                    'start_pos': word_info['start_pos'],
+                    'end_pos': word_info['end_pos'],
+                    'dictionary_info': phrase_info
+                })
+                continue
+            
+            # Проверяем совпадение по формам слова
+            for form in phrase_info['word_forms']:
+                if form in text_normal_forms:
+                    word_info = text_normal_forms[form]
+                    found_phrases.append({
+                        'phrase': word_info['word'],
+                        'start_pos': word_info['start_pos'],
+                        'end_pos': word_info['end_pos'],
+                        'dictionary_info': phrase_info
+                    })
+                    break
+        
+        # Сортируем по позиции в тексте
+        found_phrases.sort(key=lambda x: x['start_pos'])
+        
+        # Удаляем перекрывающиеся фразы (оставляем самые длинные)
+        filtered_phrases = []
+        for phrase_info in found_phrases:
+            is_overlapping = False
+            for existing_phrase in filtered_phrases:
+                if (phrase_info['start_pos'] < existing_phrase['end_pos'] and 
+                    phrase_info['end_pos'] > existing_phrase['start_pos']):
+                    is_overlapping = True
+                    break
+            
+            if not is_overlapping:
+                filtered_phrases.append(phrase_info)
+        
+        return filtered_phrases
+    
+    def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
+        """Проверяет, что найденная фраза является отдельным словом/фразой"""
+        import re
+        
+        # Определяем границы слова
+        word_boundary_pattern = r'\b'
+        
+        # Проверяем начало
+        if start_pos > 0:
+            before_text = text[:start_pos]
+            if not re.search(r'\W$', before_text) and not re.search(r'\s$', before_text):
+                return False
+        
+        # Проверяем конец
+        if end_pos < len(text):
+            after_text = text[end_pos:]
+            if not re.search(r'^\W', after_text) and not re.search(r'^\s', after_text):
+                return False
+        
+        return True
+    
+    async def _get_existing_dialog_dictionaries(self, db: AsyncSession, dialog_id: UUID) -> Set[UUID]:
+        """Получает существующие связи диалога со словарями"""
+        from app.models.dialogs import DialogDictionary
+        from sqlalchemy import select
+        
+        query = select(DialogDictionary.dictionary_id).where(DialogDictionary.dialog_id == dialog_id)
+        result = await db.execute(query)
+        return {row.dictionary_id for row in result.fetchall()}
+    
+    async def populate_dialog_dictionary(self, db: AsyncSession, dialog_id: UUID) -> Dict[str, Any]:
+        """Заполняет таблицу dialog_dictionary для конкретного диалога"""
+        try:
+            from app.models.dialogs import Dialog, DialogDictionary
+            from sqlalchemy import select
+            
+            # Получаем диалог
+            query = select(Dialog).where(Dialog.id == dialog_id)
+            result = await db.execute(query)
+            dialog = result.scalar_one_or_none()
+            
+            if not dialog:
+                self.logger.warning(f"Диалог с ID {dialog_id} не найден")
+                return {"success": False, "message": "Диалог не найден", "added_count": 0}
+            
+            # Загружаем фразы и словари
+            phrase_cache = await self._load_phrases_and_dictionaries(db)
+            
+            # Находим фразы в тексте
+            found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
+            
+            if not found_phrases:
+                self.logger.info(f"В диалоге {dialog_id} не найдено фраз из словарей")
+                return {"success": True, "message": "Фразы не найдены", "added_count": 0}
+            
+            # Получаем существующие связи
+            existing_dictionary_ids = await self._get_existing_dialog_dictionaries(db, dialog_id)
+            
+            # Собираем уникальные словари из найденных фраз
+            found_dictionary_ids = set()
+            for phrase_info in found_phrases:
+                found_dictionary_ids.add(phrase_info['dictionary_info']['dictionary_id'])
+            
+            # Определяем новые связи для добавления
+            new_dictionary_ids = found_dictionary_ids - existing_dictionary_ids
+            
+            if not new_dictionary_ids:
+                self.logger.info(f"Для диалога {dialog_id} все связи со словарями уже существуют")
+                return {
+                    "success": True, 
+                    "message": "Все связи уже существуют", 
+                    "added_count": 0,
+                    "total_found": len(found_dictionary_ids)
+                }
+            
+            # Создаем новые записи в dialog_dictionary
+            new_records = []
+            for dictionary_id in new_dictionary_ids:
+                new_records.append(DialogDictionary(
+                    dialog_id=dialog_id,
+                    dictionary_id=dictionary_id
+                ))
+            
+            # Добавляем записи в базу данных
+            db.add_all(new_records)
+            await db.commit()
+            
+            self.logger.info(f"Для диалога {dialog_id} добавлено {len(new_records)} новых связей со словарями")
+            
+            return {
+                "success": True,
+                "message": f"Добавлено {len(new_records)} новых связей",
+                "added_count": len(new_records),
+                "total_found": len(found_dictionary_ids),
+                "found_phrases_count": len(found_phrases)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при заполнении dialog_dictionary для диалога {dialog_id}: {e}")
+            await db.rollback()
+            return {"success": False, "message": f"Ошибка: {str(e)}", "added_count": 0}
+    
+    async def populate_all_dialogs_dictionaries(self, db: AsyncSession, organization_id: Optional[UUID] = None) -> Dict[str, Any]:
+        """Заполняет таблицу dialog_dictionary для всех диалогов организации"""
+        try:
+            from app.models.dialogs import Dialog
+            from app.models.users import Employee
+            from sqlalchemy import select
+            
+            # Формируем запрос
+            query = select(Dialog.id, Dialog.conversation).join(Employee, Dialog.employee_id == Employee.id)
+            
+            if organization_id:
+                query = query.where(Employee.organization_id == organization_id)
+            
+            result = await db.execute(query)
+            dialogs = result.fetchall()
+            
+            if not dialogs:
+                self.logger.info("Не найдено диалогов для заполнения словарей")
+                return {
+                    "success": True,
+                    "message": "Не найдено диалогов",
+                    "processed_count": 0,
+                    "total_added": 0
+                }
+            
+            self.logger.info(f"Найдено {len(dialogs)} диалогов для обработки")
+            
+            total_added = 0
+            processed_count = 0
+            errors = []
+            
+            for dialog in dialogs:
+                try:
+                    result = await self.populate_dialog_dictionary(db, dialog.id)
+                    if result["success"]:
+                        total_added += result["added_count"]
+                        processed_count += 1
+                        
+                        if result["added_count"] > 0:
+                            self.logger.info(f"Диалог {dialog.id}: добавлено {result['added_count']} связей")
+                    else:
+                        errors.append(f"Диалог {dialog.id}: {result['message']}")
+                        
+                except Exception as e:
+                    error_msg = f"Диалог {dialog.id}: {str(e)}"
+                    errors.append(error_msg)
+                    self.logger.error(error_msg)
+            
+            self.logger.info(f"Обработано {processed_count} диалогов, добавлено {total_added} связей")
+            
+            return {
+                "success": True,
+                "message": f"Обработано {processed_count} диалогов, добавлено {total_added} связей",
+                "processed_count": processed_count,
+                "total_added": total_added,
+                "errors": errors if errors else None
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при заполнении словарей для всех диалогов: {e}")
+            return {
+                "success": False,
+                "message": f"Ошибка: {str(e)}",
+                "processed_count": 0,
+                "total_added": 0
+            }
+    
+    async def clear_dialog_dictionaries(self, db: AsyncSession, dialog_id: Optional[UUID] = None) -> Dict[str, Any]:
+        """Очищает связи диалогов со словарями"""
+        try:
+            from app.models.dialogs import DialogDictionary
+            from sqlalchemy import delete
+            
+            if dialog_id:
+                # Удаляем связи для конкретного диалога
+                query = delete(DialogDictionary).where(DialogDictionary.dialog_id == dialog_id)
+                result = await db.execute(query)
+                await db.commit()
+                
+                deleted_count = result.rowcount
+                self.logger.info(f"Удалено {deleted_count} связей для диалога {dialog_id}")
+                
+                return {
+                    "success": True,
+                    "message": f"Удалено {deleted_count} связей для диалога {dialog_id}",
+                    "deleted_count": deleted_count
+                }
+            else:
+                # Удаляем все связи
+                query = delete(DialogDictionary)
+                result = await db.execute(query)
+                await db.commit()
+                
+                deleted_count = result.rowcount
+                self.logger.info(f"Удалено {deleted_count} связей для всех диалогов")
+                
+                return {
+                    "success": True,
+                    "message": f"Удалено {deleted_count} связей для всех диалогов",
+                    "deleted_count": deleted_count
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Ошибка при очистке связей диалогов со словарями: {e}")
+            await db.rollback()
+            return {
+                "success": False,
+                "message": f"Ошибка: {str(e)}",
+                "deleted_count": 0
+            }
+    
+    def clear_cache(self):
+        """Очищает кэш фраз и словарей"""
+        self._phrase_cache = None
+
+
+# Создаем экземпляр сервиса заполнения словарей
+dialog_dictionary_populator = DialogDictionaryPopulator()
