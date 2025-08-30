@@ -10,21 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from pydub import AudioSegment
 
-from app.core.config import settings
+# Импорт для морфологического анализа
+from natasha import MorphVocab, Segmenter, NewsEmbedding, NewsMorphTagger, NewsSyntaxParser, NewsNERTagger
+from natasha.doc import Doc
 
+from app.core.config import settings
 from app.core.logging import LoggerMixin
 from app.crud.audio_data import audio_data_crud, audio_data_for_analysis_crud
 from app.crud.users import employee_crud
 from app.schemas.users import EmployeeCreate
 
-# Импорт для морфологического анализа
-try:
-    from natasha import MorphVocab
-    MORPH = MorphVocab()
-    MORPH_AVAILABLE = True
-except ImportError:
-    MORPH = None
-    MORPH_AVAILABLE = False
+# Инициализация компонентов natasha
+MORPH = MorphVocab()
+SEGMENTER = Segmenter()
+EMB = NewsEmbedding()
+MORPH_TAGGER = NewsMorphTagger(EMB)
+SYNTAX_PARSER = NewsSyntaxParser(EMB)
+NER_TAGGER = NewsNERTagger(EMB)
 
 # Устанавливаем пути к ffmpeg для pydub (только для Windows)
 if os.name == 'nt':  # Windows
@@ -35,8 +37,110 @@ if os.name == 'nt':  # Windows
     AudioSegment.ffprobe = settings.FFMPEG_FFPROBE
 
 
-def normalize_word(word: str) -> str:
-    """Приводит слово к нормальной форме (инфинитив)"""
+def normalize_word_natasha(word: str) -> str:
+    """Приводит слово к нормальной форме используя natasha"""
+    if not word:
+        return word
+    
+    try:
+        # Создаем документ для анализа
+        doc = Doc(word)
+        doc.segment(SEGMENTER)
+        doc.tag_morph(MORPH_TAGGER)
+        
+        # Получаем нормальную форму
+        for token in doc.tokens:
+            if token.pos in ['NOUN', 'ADJ', 'VERB', 'ADV']:
+                lemma = token.lemma.lower()
+                # Проверяем, что лемма не пустая и отличается от исходного слова
+                if lemma and lemma != word.lower():
+                    return lemma
+        
+        # Если не удалось получить лемму или лемма совпадает с исходным словом,
+        # используем fallback метод
+        return normalize_word_fallback(word)
+        
+    except Exception:
+        # В случае ошибки используем fallback метод
+        return normalize_word_fallback(word)
+
+
+def get_word_forms_natasha(word: str) -> Set[str]:
+    """Получает все возможные формы слова используя natasha"""
+    if not word:
+        return {word}
+    
+    forms = {word.lower()}
+    
+    try:
+        # Создаем документ для анализа
+        doc = Doc(word)
+        doc.segment(SEGMENTER)
+        doc.tag_morph(MORPH_TAGGER)
+        
+        # Получаем нормальную форму
+        for token in doc.tokens:
+            if token.pos in ['NOUN', 'ADJ', 'VERB', 'ADV']:
+                lemma = token.lemma.lower()
+                forms.add(lemma)
+                
+                # Для глаголов добавляем основные формы
+                if token.pos == 'VERB':
+                    # Генерируем основные формы глагола
+                    base = lemma[:-2] if lemma.endswith('ть') else lemma
+                    forms.update([
+                        base + 'ю', base + 'ешь', base + 'ет', base + 'ем', base + 'ете', base + 'ют',
+                        base + 'л', base + 'ла', base + 'ло', base + 'ли',
+                        base + 'ющий', base + 'ющая', base + 'ющее', base + 'ющие'
+                    ])
+                break
+        
+        # Если natasha не дала хороших результатов, используем fallback
+        if len(forms) <= 2:  # Только исходное слово и лемма
+            fallback_forms = get_word_forms_fallback(word)
+            forms.update(fallback_forms)
+        
+        return forms
+        
+    except Exception:
+        # В случае ошибки используем fallback
+        return get_word_forms_fallback(word)
+
+
+def extract_words_from_text_natasha(text: str) -> List[Dict[str, Any]]:
+    """Извлекает слова из текста с их позициями и нормальными формами используя natasha"""
+    import re
+    
+    if not text:
+        return []
+    
+    try:
+        # Создаем документ для анализа
+        doc = Doc(text)
+        doc.segment(SEGMENTER)
+        doc.tag_morph(MORPH_TAGGER)
+        
+        words = []
+        for token in doc.tokens:
+            if token.pos in ['NOUN', 'ADJ', 'VERB', 'ADV', 'PROPN']:
+                words.append({
+                    'word': token.text,
+                    'normal_form': token.lemma.lower(),
+                    'start_pos': token.start,
+                    'end_pos': token.stop,
+                    'pos': token.pos,
+                    'word_forms': get_word_forms_natasha(token.text)
+                })
+        
+        return words
+        
+    except Exception:
+        # В случае ошибки используем fallback метод
+        return extract_words_from_text_fallback(text)
+
+
+def normalize_word_fallback(word: str) -> str:
+    """Fallback метод для нормализации слов (старый метод)"""
     if not word:
         return word
     
@@ -53,7 +157,25 @@ def normalize_word(word: str) -> str:
         'помогу': 'помочь',
         'поможем': 'помочь',
         'поможете': 'помочь',
-        'помогут': 'помочь'
+        'помогут': 'помочь',
+        # Добавляем исключения на основе данных из CSV
+        'не привезли': 'не привозить',
+        'не получил': 'не получать',
+        'не доставили': 'не доставлять',
+        'не успели': 'не успевать',
+        'не ответили': 'не отвечать',
+        'не пришел': 'не приходить',
+        'не разобрались': 'не разбираться',
+        'не прислали': 'не присылать',
+        'не везут': 'не везти',
+        'не приехал': 'не приезжать',
+        'не назвали': 'не называть',
+        'не связались': 'не связываться',
+        'не рассказали': 'не рассказывать',
+        'не сообщили': 'не сообщать',
+        'не доехал': 'не доезжать',
+        'не отправили': 'не отправлять',
+        'не заехал': 'не заезжать'
     }
     
     # Проверяем исключения
@@ -77,8 +199,13 @@ def normalize_word(word: str) -> str:
     return word_lower
 
 
-def get_word_forms(word: str) -> Set[str]:
-    """Получает все возможные формы слова"""
+def normalize_word(word: str) -> str:
+    """Приводит слово к нормальной форме используя natasha"""
+    return normalize_word_natasha(word)
+
+
+def get_word_forms_fallback(word: str) -> Set[str]:
+    """Fallback метод для получения форм слов (старый метод)"""
     if not word:
         return {word}
     
@@ -116,8 +243,13 @@ def get_word_forms(word: str) -> Set[str]:
     return forms
 
 
-def extract_words_from_text(text: str) -> List[Dict[str, Any]]:
-    """Извлекает слова из текста с их позициями и нормальными формами"""
+def get_word_forms(word: str) -> Set[str]:
+    """Получает все возможные формы слова используя natasha"""
+    return get_word_forms_natasha(word)
+
+
+def extract_words_from_text_fallback(text: str) -> List[Dict[str, Any]]:
+    """Fallback метод для извлечения слов из текста (старый метод)"""
     import re
     
     if not text:
@@ -141,6 +273,11 @@ def extract_words_from_text(text: str) -> List[Dict[str, Any]]:
         })
     
     return words
+
+
+def extract_words_from_text(text: str) -> List[Dict[str, Any]]:
+    """Извлекает слова из текста с их позициями и нормальными формами используя natasha"""
+    return extract_words_from_text_natasha(text)
 
 
 class VocaAPIService(LoggerMixin):
@@ -803,9 +940,11 @@ class DialogTextHighlighter(LoggerMixin):
         # Создаем кэш: {phrase: {dictionary_id, title, color, normal_form, word_forms}}
         phrase_cache = {}
         for row in rows:
+            # Используем нормализованную форму из БД, если она есть
+            normal_form = row.normal_form if row.normal_form else normalize_word(row.phrase)
+            
             # Получаем все формы слова для поиска однокоренных слов
             word_forms = get_word_forms(row.phrase)
-            normal_form = row.normal_form or normalize_word(row.phrase)
             
             phrase_info = {
                 'dictionary_id': row.id,
@@ -818,7 +957,7 @@ class DialogTextHighlighter(LoggerMixin):
             # Добавляем оригинальную фразу
             phrase_cache[row.phrase] = phrase_info
             
-            # Добавляем нормализованную форму
+            # Добавляем нормализованную форму из БД
             phrase_cache[normal_form] = phrase_info
             
             # Добавляем все формы слова
@@ -1119,9 +1258,11 @@ class DialogDictionaryPopulator(LoggerMixin):
         # Создаем кэш: {phrase: {dictionary_id, title, color, normal_form, word_forms}}
         phrase_cache = {}
         for row in rows:
+            # Используем нормализованную форму из БД, если она есть
+            normal_form = row.normal_form if row.normal_form else normalize_word(row.phrase)
+            
             # Получаем все формы слова для поиска однокоренных слов
             word_forms = get_word_forms(row.phrase)
-            normal_form = row.normal_form or normalize_word(row.phrase)
             
             phrase_info = {
                 'dictionary_id': row.id,
@@ -1134,7 +1275,7 @@ class DialogDictionaryPopulator(LoggerMixin):
             # Добавляем оригинальную фразу
             phrase_cache[row.phrase] = phrase_info
             
-            # Добавляем нормализованную форму
+            # Добавляем нормализованную форму из БД
             phrase_cache[normal_form] = phrase_info
             
             # Добавляем все формы слова
