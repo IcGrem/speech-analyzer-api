@@ -273,3 +273,14 @@ class DialogHighlightedResponse(BaseModel):
     was_updated_in_db: bool = Field(False, description="Был ли диалог обновлен в базе данных")
     
     model_config = ConfigDict(from_attributes=True)
+
+class DictionaryWithWordsResponse(BaseModel):
+    """Схема ответа для словаря со списком слов"""
+    id: UUID
+    title: str
+    description: str
+    color: str
+    words: List[str]
+
+    model_config = ConfigDict(from_attributes=True)
+

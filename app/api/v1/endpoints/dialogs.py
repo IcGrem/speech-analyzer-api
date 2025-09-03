@@ -17,6 +17,7 @@ from app.schemas.dialogs import (
     DialogList,
     DialogWithEmployee,
     DialogsByDictionariesResponse,
+    DictionaryWithWordsResponse,
     EmployeeMetrics,
     OrganizationDailyMetrics,
     AudioDownloadRequest,
@@ -734,6 +735,17 @@ async def get_dialogs_by_dictionaries(
     
     result = await dialog_crud.get_dialogs_by_dictionaries(db, organization_id, start_date, end_date, parsed_employee_ids)
     return [DialogsByDictionariesResponse(**item) for item in result]
+
+
+# Получить все словари со списком слов
+@router.get("/get-all-dictionaries-with-words", response_model=List[DictionaryWithWordsResponse], description="Получение всех словарей со списком слов")
+async def get_all_dictionaries_with_words(
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> List[DictionaryWithWordsResponse]:
+    """Получение всех словарей со списком слов"""
+    result = await dialog_crud.get_all_dictionaries_with_words(db)
+    return [DictionaryWithWordsResponse(**item) for item in result]
 
 
 # @router.get("/get-dialogs-by-type/{conversation_type}", response_model=List[DialogList], description="Получение диалогов по типу разговора")

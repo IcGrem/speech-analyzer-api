@@ -691,5 +691,18 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             for row in rows
         ]
 
+
+    # Получить все словари со списком слов
+    async def get_all_dictionaries_with_words(self, db: AsyncSession) -> List[Dict[str, Any]]:
+        """Получить все словари со списком слов"""
+        query = select(Dictionary.id, Dictionary.title, Dictionary.description, Dictionary.color).join(Phrase, Dictionary.id == Phrase.dictionary_id)
+        query = query.group_by(Dictionary.id, Dictionary.title, Dictionary.description, Dictionary.color)
+        query = query.order_by(Dictionary.title)
+        result = await db.execute(query)
+        rows = result.fetchall()
+        for row in rows:
+            row.words = [phrase.phrase for phrase in row.phrases]
+        return rows
+
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog) 
