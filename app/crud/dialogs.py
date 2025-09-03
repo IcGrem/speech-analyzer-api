@@ -710,9 +710,22 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         query = query.order_by(Dictionary.title)
         result = await db.execute(query)
         rows = result.fetchall()
+        
+        # Группируем фразы по словарям
+        dictionaries = {}
         for row in rows:
-            row.words = [row.phrase]
-        return rows
+            dict_id = row.id
+            if dict_id not in dictionaries:
+                dictionaries[dict_id] = {
+                    "id": row.id,
+                    "title": row.title,
+                    "description": row.description,
+                    "color": row.color,
+                    "words": []
+                }
+            dictionaries[dict_id]["words"].append(row.phrase)
+        
+        return list(dictionaries.values())
 
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog) 
