@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.crud.base import CRUDBase
 from app.models.users import Employee
-from app.models.dialogs import Dialog, ConversationType, DialogDictionary, Dictionary
+from app.models.dialogs import Dialog, ConversationType, DialogDictionary, Dictionary, Phrase
 from app.schemas.dialogs import DialogCreate, DialogUpdate
 from app.core.logging import get_logger
 
@@ -695,8 +695,14 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     # Получить все словари со списком слов
     async def get_all_dictionaries_with_words(self, db: AsyncSession) -> List[Dict[str, Any]]:
         """Получить все словари со списком слов"""
-        query = select(Dictionary.id, Dictionary.title, Dictionary.description, Dictionary.color).join(Phrase, Dictionary.id == Phrase.dictionary_id)
-        query = query.group_by(Dictionary.id, Dictionary.title, Dictionary.description, Dictionary.color)
+        query = select(
+            Dictionary.id, Dictionary.title, Dictionary.description, Dictionary.color
+            ).join(
+                Phrase, Dictionary.id == Phrase.dictionary_id
+            )
+        query = query.group_by(
+            Dictionary.id, Dictionary.title, Dictionary.description, Dictionary.color
+            )
         query = query.order_by(Dictionary.title)
         result = await db.execute(query)
         rows = result.fetchall()
