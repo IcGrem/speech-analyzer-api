@@ -619,98 +619,85 @@ async def get_organization_average_metrics(
     )
 
 
-@router.get("/get-employee-average-metrics/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Получение средних метрик всех сотрудников организации в формате графика")
-async def get_employee_average_metrics(
+@router.get("/get-dialog-counts-by-dictionaries/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Количество диалогов по словарям в разрезе сотрудников (Chart.js)")
+async def get_dialog_counts_by_dictionaries(
     organization_id: UUID,
-    metric_types: str = Query(..., description="Список метрик через запятую (greeting_farewell_score,completeness_score,tone_score,openness_helpfulness_score,listening_score,empathy_score,speech_quality_score,response_time_score,overall_score)"),
     employee_ids: Optional[str] = Query(None, description="Список ID сотрудников через запятую"),
     start_date: Optional[datetime] = Query(None, description="Дата начала фильтра"),
     end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
     db: AsyncSession = Depends(get_db)
 ) -> EmployeeMetricsChartResponse:
-    """Получение средних метрик всех сотрудников организации в формате Chart.js с фильтрацией по метрикам и датам"""
-    
-    # Парсим список метрик
-    try:
-        parsed_metric_types = [metric.strip() for metric in metric_types.split(',')]
-        # Валидируем метрики
-        valid_metrics = {
-            "greeting_farewell_score", "completeness_score", "tone_score", 
-            "openness_helpfulness_score", "listening_score", "empathy_score", 
-            "speech_quality_score", "response_time_score", "overall_score"
-        }
-        for metric in parsed_metric_types:
-            if metric not in valid_metrics:
-                raise HTTPException(status_code=400, detail=f"Неверная метрика: {metric}")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Неверный формат списка метрик: {str(e)}")
-    
-    # Парсим employee_ids из строки
+    """Вернуть данные для диаграммы:
+    - labels: список словарей (title)
+    - datasets: по одному набору на сотрудника, значения — количество диалогов в каждом словаре
+    """
+
+    # Парсим employee_ids
     parsed_employee_ids = None
     if employee_ids:
         try:
-            parsed_employee_ids = [UUID(emp_id.strip()) for emp_id in employee_ids.split(',')]
+            parsed_employee_ids = [UUID(emp_id.strip()) for emp_id in employee_ids.split(',') if emp_id.strip()]
         except ValueError:
             raise HTTPException(status_code=400, detail="Неверный формат ID сотрудников")
-    
-    # Словарь для преобразования названий метрик
-    metrics_names = {
-        "greeting_farewell_score": "Приветствие и прощание",
-        "completeness_score": "Полнота ответа",
-        "tone_score": "Тон общения",
-        "openness_helpfulness_score": "Открытость и готовность помочь",
-        "listening_score": "Умение слушать",
-        "empathy_score": "Эмпатия",
-        "speech_quality_score": "Грамотная речь",
-        "response_time_score": "Время ответа",
-        "overall_score": "Итоговая оценка"
-    }
-    
-    # Получаем данные средних метрик сотрудников
-    logger.info(f"Запрос средних метрик сотрудников для организации {organization_id}, metrics={parsed_metric_types}, start_date={start_date}, end_date={end_date}")
-    employees_data = await dialog_crud.get_employee_average_metrics_by_organization(
-        db,
-        organization_id,
-        parsed_metric_types,
+
+    # Забираем сырые строки сгруппированных данных
+    rows = await dialog_crud.get_dialog_counts_by_dictionary_and_employee(
+        db=db,
+        organization_id=organization_id,
         start_date=start_date,
         end_date=end_date,
-        employee_ids=parsed_employee_ids,
+        employee_ids=parsed_employee_ids
     )
-    logger.info(f"Получено {len(employees_data)} сотрудников")
-    
-    # Генерируем случайные цвета для каждого сотрудника
+
+    # Собираем множества словарей и сотрудников
+    dictionary_order = []
+    dictionary_key_to_index = {}
+    employee_key_to_name = {}
+
+    # map[(employee_id, dict_id)] -> count
+    counts = {}
+
+    for row in rows:
+        dict_id = row.dictionary_id
+        dict_title = row.dictionary_title
+        emp_id = row.employee_id
+        emp_name = f"{row.first_name} {row.last_name}"
+        cnt = int(row.dialogs_count or 0)
+
+        if dict_id not in dictionary_key_to_index:
+            dictionary_key_to_index[dict_id] = len(dictionary_order)
+            dictionary_order.append(dict_title)
+
+        employee_key_to_name[emp_id] = emp_name
+        counts[(emp_id, dict_id)] = cnt
+
+    # Формируем labels: список названий словарей в порядке появления
+    labels = dictionary_order
+
+    # Цвета
     colors = [
         "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
         "#f43f5e", "#ef4444", "#f97316", "#f59e0b", "#eab308",
         "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
-        "#0ea5e9", "#3b82f6", "#ccc6f1", "#8b5cf6", "#a855f7"
+        "#0ea5e9", "#3b82f6", "#4b5563", "#059669", "#991b1b"
     ]
-    
-    # Формируем labels (названия метрик)
-    labels = [metrics_names[metric_type] for metric_type in parsed_metric_types]
-    
-    # Формируем datasets (данные сотрудников)
+
+    # Для каждого сотрудника собираем массив значений по всем словарям
+    # Чтобы корректно связать labels (title) с dict_id, соберем список dict_ids в порядке labels
+    ordered_dict_ids = [None] * len(dictionary_order)
+    for dict_id, idx in dictionary_key_to_index.items():
+        ordered_dict_ids[idx] = dict_id
+
+    # Теперь построим datasets
     datasets = []
-    for i, employee in enumerate(employees_data):
-        employee_name = f"{employee.first_name} {employee.last_name}"
-        data = []
-        
-        for metric_type in parsed_metric_types:
-            metric_value = float(getattr(employee, f"avg_{metric_type}") or 0.0)
-            data.append(round(metric_value, 2))
-        
-        dataset = ChartDataset(
-            label=employee_name,
-            data=data,
-            backgroundColor=colors[i % len(colors)]
-        )
-        datasets.append(dataset)
-    
-    return EmployeeMetricsChartResponse(
-        labels=labels,
-        datasets=datasets
-    )
+    for i, (emp_id, emp_name) in enumerate(sorted(employee_key_to_name.items(), key=lambda x: x[1])):
+        series = []
+        for dict_id in ordered_dict_ids:
+            series.append(int(counts.get((emp_id, dict_id), 0)))
+        datasets.append(ChartDataset(label=emp_name, data=series, backgroundColor=colors[i % len(colors)]))
+
+    return EmployeeMetricsChartResponse(labels=labels, datasets=datasets)
 
 
 # эндпоинт для получения количества диалогов в разрезе названий словарей из поля dictionaries диалога или свойства dictionaries_list

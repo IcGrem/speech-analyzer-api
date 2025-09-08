@@ -692,6 +692,69 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         ]
 
 
+    async def get_dialog_counts_by_dictionary_and_employee(
+        self,
+        db: AsyncSession,
+        organization_id: UUID,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        employee_ids: Optional[List[UUID]] = None
+    ) -> List[Dict[str, Any]]:
+        """Получить количество диалогов, сгруппированных по словарям и сотрудникам.
+
+        Возвращает строки с полями:
+        - dictionary_id, dictionary_title, dictionary_description, dictionary_color
+        - employee_id, first_name, last_name
+        - dialogs_count
+        """
+
+        query = select(
+            Dictionary.id.label("dictionary_id"),
+            Dictionary.title.label("dictionary_title"),
+            Dictionary.description.label("dictionary_description"),
+            Dictionary.color.label("dictionary_color"),
+            Employee.id.label("employee_id"),
+            Employee.first_name,
+            Employee.last_name,
+            func.count(Dialog.id).label("dialogs_count")
+        ).join(
+            DialogDictionary, DialogDictionary.dictionary_id == Dictionary.id
+        ).join(
+            Dialog, DialogDictionary.dialog_id == Dialog.id
+        ).join(
+            Employee, Dialog.employee_id == Employee.id
+        ).where(
+            Employee.organization_id == organization_id,
+            Dialog.conversation_type == ConversationType.M2C
+        )
+
+        # Фильтры
+        if start_date:
+            query = query.where(Dialog.recording_start_date >= start_date)
+        if end_date:
+            query = query.where(Dialog.recording_start_date <= end_date)
+        if employee_ids:
+            query = query.where(Employee.id.in_(employee_ids))
+
+        query = query.group_by(
+            Dictionary.id,
+            Dictionary.title,
+            Dictionary.description,
+            Dictionary.color,
+            Employee.id,
+            Employee.first_name,
+            Employee.last_name
+        )
+
+        # Для стабильности выдачи сначала по названию словаря, затем по имени сотрудника
+        query = query.order_by(Dictionary.title.asc(), Employee.first_name.asc(), Employee.last_name.asc())
+
+        result = await db.execute(query)
+        rows = result.fetchall()
+
+        return rows
+
+
     # Получить все словари со списком слов
     async def get_all_dictionaries_with_words(self, db: AsyncSession) -> List[Dict[str, Any]]:
         """Получить все словари со списком слов"""
