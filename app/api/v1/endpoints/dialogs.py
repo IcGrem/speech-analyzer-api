@@ -662,13 +662,15 @@ async def get_dialog_counts_by_dictionaries(
     for row in rows:
         dict_id = row.dictionary_id
         dict_title = row.dictionary_title
+        dict_description = row.dictionary_description
+        dict_color = row.dictionary_color
         emp_id = row.employee_id
         emp_name = f"{row.first_name} {row.last_name}"
         cnt = int(row.dialogs_count or 0)
 
         if dict_id not in dictionary_key_to_index:
             dictionary_key_to_index[dict_id] = len(dictionary_order)
-            dictionary_order.append(dict_title)
+            dictionary_order.append(dict_description)
 
         employee_key_to_name[emp_id] = emp_name
         counts[(emp_id, dict_id)] = cnt
