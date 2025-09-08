@@ -619,7 +619,8 @@ async def get_organization_average_metrics(
     )
 
 
-@router.get("/get-dialog-counts-by-dictionaries/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Количество диалогов по словарям в разрезе сотрудников (Chart.js)")
+@router.get("/get-employee-average-metrics/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Количество диалогов по словарям в разрезе сотрудников (Chart.js)")
+# @router.get("/get-dialog-counts-by-dictionaries/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Количество диалогов по словарям в разрезе сотрудников (Chart.js)")
 async def get_dialog_counts_by_dictionaries(
     organization_id: UUID,
     employee_ids: Optional[str] = Query(None, description="Список ID сотрудников через запятую"),
