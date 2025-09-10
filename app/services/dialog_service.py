@@ -1227,16 +1227,21 @@ class DialogTextHighlighter(LoggerMixin):
     ) -> Dict[UUID, str]:
         """Подсвечивает текст диалогов организации только словами из указанного словаря и обновляет их в БД"""
         try:
-            from app.models.dialogs import Dialog
+            from app.models.dialogs import Dialog, DialogDictionary
             from app.models.users import Employee
             from sqlalchemy import select, update
 
-            # Получаем диалоги
-            query = select(Dialog.id, Dialog.conversation).join(Employee, Dialog.employee_id == Employee.id)
+            # Получаем только те диалоги, которые связаны со словарём через dialog_dictionary
+            query = (
+                select(Dialog.id, Dialog.conversation)
+                .join(Employee, Dialog.employee_id == Employee.id)
+                .join(DialogDictionary, DialogDictionary.dialog_id == Dialog.id)
+                .where(DialogDictionary.dictionary_id == dictionary_id)
+            )
             if organization_id:
                 query = query.where(Employee.organization_id == organization_id)
 
-            result = await db.execute(query)
+            result = await db.execute(query.distinct())
             dialogs = result.fetchall()
 
             if not dialogs:
