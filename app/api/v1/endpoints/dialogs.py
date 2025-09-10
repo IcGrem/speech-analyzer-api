@@ -25,6 +25,8 @@ from app.schemas.dialogs import (
     EmployeeMetricsChartResponse,
     OrganizationDailyMetricsChartResponse,
     ChartDataset,
+    DictionaryLabel,
+    DialogCountsByDictionariesChartResponse,
     MetricType,
     OrganizationAverageMetricsResponse,
     AverageMetricScore,
@@ -619,8 +621,8 @@ async def get_organization_average_metrics(
     )
 
 
-@router.get("/get-employee-average-metrics/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Количество диалогов по словарям в разрезе сотрудников (Chart.js)")
-# @router.get("/get-dialog-counts-by-dictionaries/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Количество диалогов по словарям в разрезе сотрудников (Chart.js)")
+# @router.get("/get-employee-average-metrics/{organization_id}", response_model=EmployeeMetricsChartResponse, description="Количество диалогов по словарям в разрезе сотрудников (Chart.js)")
+@router.get("/get-dialog-counts-by-dictionaries/{organization_id}", response_model=DialogCountsByDictionariesChartResponse, description="Количество диалогов по словарям в разрезе сотрудников (Chart.js)")
 async def get_dialog_counts_by_dictionaries(
     organization_id: UUID,
     employee_ids: Optional[str] = Query(None, description="Список ID сотрудников через запятую"),
@@ -628,7 +630,7 @@ async def get_dialog_counts_by_dictionaries(
     end_date: Optional[datetime] = Query(None, description="Дата окончания фильтра"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
     db: AsyncSession = Depends(get_db)
-) -> EmployeeMetricsChartResponse:
+) -> DialogCountsByDictionariesChartResponse:
     """Вернуть данные для диаграммы:
     - labels: список словарей (title)
     - datasets: по одному набору на сотрудника, значения — количество диалогов в каждом словаре
@@ -652,8 +654,9 @@ async def get_dialog_counts_by_dictionaries(
     )
 
     # Собираем множества словарей и сотрудников
-    dictionary_order = []
+    dictionary_order_ids = []
     dictionary_key_to_index = {}
+    dictionary_id_to_label: Dict[UUID, DictionaryLabel] = {}
     employee_key_to_name = {}
 
     # map[(employee_id, dict_id)] -> count
@@ -669,14 +672,15 @@ async def get_dialog_counts_by_dictionaries(
         cnt = int(row.dialogs_count or 0)
 
         if dict_id not in dictionary_key_to_index:
-            dictionary_key_to_index[dict_id] = len(dictionary_order)
-            dictionary_order.append(dict_description)
+            dictionary_key_to_index[dict_id] = len(dictionary_order_ids)
+            dictionary_order_ids.append(dict_id)
+            dictionary_id_to_label[dict_id] = DictionaryLabel(description=dict_description or "", color=dict_color or "#4b5563")
 
         employee_key_to_name[emp_id] = emp_name
         counts[(emp_id, dict_id)] = cnt
 
-    # Формируем labels: список названий словарей в порядке появления
-    labels = dictionary_order
+    # Формируем labels: список объектов {description, color} в порядке появления
+    labels = [dictionary_id_to_label[dict_id] for dict_id in dictionary_order_ids]
 
     # Цвета
     colors = [
@@ -688,7 +692,7 @@ async def get_dialog_counts_by_dictionaries(
 
     # Для каждого сотрудника собираем массив значений по всем словарям
     # Чтобы корректно связать labels (title) с dict_id, соберем список dict_ids в порядке labels
-    ordered_dict_ids = [None] * len(dictionary_order)
+    ordered_dict_ids = [None] * len(dictionary_order_ids)
     for dict_id, idx in dictionary_key_to_index.items():
         ordered_dict_ids[idx] = dict_id
 
@@ -700,7 +704,7 @@ async def get_dialog_counts_by_dictionaries(
             series.append(int(counts.get((emp_id, dict_id), 0)))
         datasets.append(ChartDataset(label=emp_name, data=series, backgroundColor=colors[i % len(colors)]))
 
-    return EmployeeMetricsChartResponse(labels=labels, datasets=datasets)
+    return DialogCountsByDictionariesChartResponse(labels=labels, datasets=datasets)
 
 
 # эндпоинт для получения количества диалогов в разрезе названий словарей из поля dictionaries диалога или свойства dictionaries_list
@@ -960,6 +964,42 @@ async def highlight_all_dialogs(
         )
 
 
+@router.post("/highlight-dialogs-by-dictionary/{dictionary_id}", description="Подсветка диалогов организации по конкретному словарю")
+async def highlight_dialogs_by_dictionary(
+    dictionary_id: UUID,
+    organization_id: Optional[UUID] = Query(None, description="ID организации (если не указан, используется организация текущего пользователя)"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Подсветка диалогов организации по конкретному словарю"""
+    try:
+        if organization_id is None:
+            organization_id = current_user.organization_id
+
+        logger.info(f"Запуск подсветки диалогов по словарю {dictionary_id} для организации {organization_id}")
+
+        highlighted_dialogs = await dialog_highlighter.highlight_dialogs_by_dictionary(
+            db, dictionary_id, organization_id
+        )
+
+        updated_count = sum(1 for text in highlighted_dialogs.values() if '<span' in text)
+
+        return {
+            "success": True,
+            "message": f"Подсвечено {len(highlighted_dialogs)} диалогов по словарю, обновлено в БД: {updated_count}",
+            "highlighted_count": len(highlighted_dialogs),
+            "updated_in_db_count": updated_count,
+            "organization_id": organization_id,
+            "dictionary_id": str(dictionary_id)
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка при подсветке диалогов по словарю {dictionary_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при подсветке диалогов по словарю: {str(e)}"
+        )
+
 @router.post("/populate-dialog-dictionary/{dialog_id}", response_model=DialogDictionaryPopulateResponse, description="Заполнить таблицу dialog_dictionary для конкретного диалога")
 async def populate_dialog_dictionary(
     dialog_id: UUID,
@@ -1030,4 +1070,34 @@ async def clear_dialog_dictionaries(
         raise HTTPException(
             status_code=500,
             detail=f"Ошибка при очистке связей: {str(e)}"
+        )
+
+
+@router.post("/populate-all-dialogs-by_dictionary/{dictionary_id}", response_model=DialogDictionaryPopulateAllResponse, description="Заполнить dialog_dictionary для всех диалогов организации по конкретному словарю")
+async def populate_all_dialogs_by_dictionary(
+    dictionary_id: UUID,
+    organization_id: Optional[UUID] = Query(None, description="ID организации (если не указан, используется организация текущего пользователя)"),
+    current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
+    db: AsyncSession = Depends(get_db)
+) -> DialogDictionaryPopulateAllResponse:
+    """Заполнить связи dialog_dictionary по одному словарю для всех диалогов организации"""
+    try:
+        if organization_id is None:
+            organization_id = current_user.organization_id
+
+        logger.info(f"Запуск заполнения dialog_dictionary по словарю {dictionary_id} для организации {organization_id}")
+
+        result = await dialog_dictionary_populator.populate_all_dialogs_by_dictionary(
+            db=db,
+            dictionary_id=dictionary_id,
+            organization_id=organization_id
+        )
+
+        return DialogDictionaryPopulateAllResponse(**result)
+
+    except Exception as e:
+        logger.error(f"Ошибка при заполнении dialog_dictionary по словарю {dictionary_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при заполнении связей по словарю: {str(e)}"
         )

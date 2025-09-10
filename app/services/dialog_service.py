@@ -1218,6 +1218,76 @@ class DialogTextHighlighter(LoggerMixin):
             # Откатываем изменения в случае ошибки
             await db.rollback()
             return {}
+
+    async def highlight_dialogs_by_dictionary(
+        self,
+        db: AsyncSession,
+        dictionary_id: UUID,
+        organization_id: Optional[UUID] = None
+    ) -> Dict[UUID, str]:
+        """Подсвечивает текст диалогов организации только словами из указанного словаря и обновляет их в БД"""
+        try:
+            from app.models.dialogs import Dialog
+            from app.models.users import Employee
+            from sqlalchemy import select, update
+
+            # Получаем диалоги
+            query = select(Dialog.id, Dialog.conversation).join(Employee, Dialog.employee_id == Employee.id)
+            if organization_id:
+                query = query.where(Employee.organization_id == organization_id)
+
+            result = await db.execute(query)
+            dialogs = result.fetchall()
+
+            if not dialogs:
+                self.logger.info("Не найдено диалогов для подсветки по словарю")
+                return {}
+
+            # Загружаем кэш фраз и фильтруем по словарю
+            phrase_cache = await self._load_phrases_and_dictionaries(db)
+            filtered_cache = {
+                phrase: info for phrase, info in phrase_cache.items() if info.get('dictionary_id') == dictionary_id
+            }
+
+            if not filtered_cache:
+                self.logger.info(f"Для словаря {dictionary_id} нет фраз")
+                return {}
+
+            highlighted_dialogs: Dict[UUID, str] = {}
+            updated_count = 0
+
+            for dialog in dialogs:
+                try:
+                    found_phrases = self._find_phrases_in_text(dialog.conversation, filtered_cache)
+                    if found_phrases:
+                        highlighted_text = self._highlight_text_with_phrases(dialog.conversation, found_phrases)
+                        highlighted_dialogs[dialog.id] = highlighted_text
+
+                        # Обновляем запись в БД
+                        stmt = update(Dialog).where(Dialog.id == dialog.id).values(conversation=highlighted_text)
+                        await db.execute(stmt)
+                        updated_count += 1
+                        self.logger.info(
+                            f"В диалоге {dialog.id} подсвечено {len(found_phrases)} фраз по словарю {dictionary_id}"
+                        )
+                    else:
+                        highlighted_dialogs[dialog.id] = dialog.conversation
+                except Exception as e:
+                    self.logger.error(
+                        f"Ошибка при подсветке диалога {dialog.id} по словарю {dictionary_id}: {e}"
+                    )
+                    highlighted_dialogs[dialog.id] = dialog.conversation
+
+            await db.commit()
+            self.logger.info(
+                f"Подсветка по словарю {dictionary_id}: обработано {len(highlighted_dialogs)}, обновлено {updated_count}"
+            )
+            return highlighted_dialogs
+
+        except Exception as e:
+            self.logger.error(f"Ошибка при подсветке диалогов по словарю {dictionary_id}: {e}")
+            await db.rollback()
+            return {}
     
     def clear_cache(self):
         """Очищает кэш фраз и словарей"""
@@ -1573,6 +1643,171 @@ class DialogDictionaryPopulator(LoggerMixin):
                 "success": False,
                 "message": f"Ошибка: {str(e)}",
                 "deleted_count": 0
+            }
+
+    async def populate_dialog_dictionary_by_dictionary(
+        self,
+        db: AsyncSession,
+        dialog_id: UUID,
+        dictionary_id: UUID
+    ) -> Dict[str, Any]:
+        """Заполняет связь dialog_dictionary для конкретного диалога ТОЛЬКО по указанному словарю"""
+        try:
+            from app.models.dialogs import Dialog, DialogDictionary
+            from sqlalchemy import select
+
+            # Получаем диалог
+            query = select(Dialog).where(Dialog.id == dialog_id)
+            result = await db.execute(query)
+            dialog = result.scalar_one_or_none()
+
+            if not dialog:
+                self.logger.warning(f"Диалог с ID {dialog_id} не найден")
+                return {"success": False, "message": "Диалог не найден", "added_count": 0}
+
+            # Загружаем фразы и словари
+            phrase_cache = await self._load_phrases_and_dictionaries(db)
+
+            # Находим фразы в тексте
+            found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
+
+            # Фильтруем по нужному словарю
+            filtered_phrases = [p for p in found_phrases if p['dictionary_info']['dictionary_id'] == dictionary_id]
+
+            if not filtered_phrases:
+                self.logger.info(f"В диалоге {dialog_id} не найдено фраз из словаря {dictionary_id}")
+                return {
+                    "success": True,
+                    "message": "Фразы не найдены",
+                    "added_count": 0,
+                    "total_found": 0,
+                    "found_phrases_count": 0
+                }
+
+            # Проверяем, существует ли уже связь
+            exists_query = select(DialogDictionary).where(
+                DialogDictionary.dialog_id == dialog_id,
+                DialogDictionary.dictionary_id == dictionary_id
+            )
+            exists_result = await db.execute(exists_query)
+            exists = exists_result.scalar_one_or_none()
+
+            if exists:
+                self.logger.info(f"Для диалога {dialog_id} связь со словарем {dictionary_id} уже существует")
+                return {
+                    "success": True,
+                    "message": "Связь уже существует",
+                    "added_count": 0,
+                    "total_found": 1,
+                    "found_phrases_count": len(filtered_phrases)
+                }
+
+            # Добавляем новую связь
+            record = DialogDictionary(dialog_id=dialog_id, dictionary_id=dictionary_id)
+            db.add(record)
+            await db.commit()
+
+            self.logger.info(f"Для диалога {dialog_id} добавлена связь со словарем {dictionary_id}")
+
+            return {
+                "success": True,
+                "message": "Добавлена 1 связь",
+                "added_count": 1,
+                "total_found": 1,
+                "found_phrases_count": len(filtered_phrases)
+            }
+
+        except Exception as e:
+            self.logger.error(f"Ошибка при заполнении dialog_dictionary для диалога {dialog_id} по словарю {dictionary_id}: {e}")
+            await db.rollback()
+            return {"success": False, "message": f"Ошибка: {str(e)}", "added_count": 0}
+
+    async def populate_all_dialogs_by_dictionary(
+        self,
+        db: AsyncSession,
+        dictionary_id: UUID,
+        organization_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
+        """Заполняет dialog_dictionary для всех диалогов организации ТОЛЬКО по указанному словарю"""
+        try:
+            from app.models.dialogs import Dialog, DialogDictionary
+            from app.models.users import Employee
+            from sqlalchemy import select
+
+            # Выбираем диалоги
+            query = select(Dialog.id, Dialog.conversation).join(Employee, Dialog.employee_id == Employee.id)
+            if organization_id:
+                query = query.where(Employee.organization_id == organization_id)
+
+            result = await db.execute(query)
+            dialogs = result.fetchall()
+
+            if not dialogs:
+                self.logger.info("Не найдено диалогов для заполнения связей по словарю")
+                return {
+                    "success": True,
+                    "message": "Не найдено диалогов",
+                    "processed_count": 0,
+                    "total_added": 0
+                }
+
+            # Загружаем кэш фраз
+            phrase_cache = await self._load_phrases_and_dictionaries(db)
+
+            processed_count = 0
+            total_added = 0
+            errors: list[str] = []
+
+            for dialog in dialogs:
+                try:
+                    # Находим фразы
+                    found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
+                    has_target_dict = any(
+                        p['dictionary_info']['dictionary_id'] == dictionary_id for p in found_phrases
+                    )
+
+                    if not has_target_dict:
+                        processed_count += 1
+                        continue
+
+                    # Проверяем существование связи
+                    exists_query = select(DialogDictionary).where(
+                        DialogDictionary.dialog_id == dialog.id,
+                        DialogDictionary.dictionary_id == dictionary_id
+                    )
+                    exists_result = await db.execute(exists_query)
+                    exists = exists_result.scalar_one_or_none()
+
+                    if exists:
+                        processed_count += 1
+                        continue
+
+                    # Добавляем связь
+                    db.add(DialogDictionary(dialog_id=dialog.id, dictionary_id=dictionary_id))
+                    await db.commit()
+                    total_added += 1
+                    processed_count += 1
+                except Exception as e:
+                    error_msg = f"Диалог {dialog.id}: {str(e)}"
+                    errors.append(error_msg)
+                    self.logger.error(error_msg)
+                    await db.rollback()
+
+            return {
+                "success": True,
+                "message": f"Обработано {processed_count} диалогов, добавлено {total_added} связей",
+                "processed_count": processed_count,
+                "total_added": total_added,
+                "errors": errors if errors else None
+            }
+
+        except Exception as e:
+            self.logger.error(f"Ошибка при заполнении словарей по словарю {dictionary_id} для всех диалогов: {e}")
+            return {
+                "success": False,
+                "message": f"Ошибка: {str(e)}",
+                "processed_count": 0,
+                "total_added": 0
             }
     
     def clear_cache(self):

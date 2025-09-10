@@ -182,6 +182,18 @@ class ChartDataset(BaseModel):
     backgroundColor: str
 
 
+class DictionaryLabel(BaseModel):
+    """Элемент метки словаря для оси X"""
+    description: str
+    color: str
+
+
+class DialogCountsByDictionariesChartResponse(BaseModel):
+    """Схема ответа: количество диалогов по словарям (Chart.js)"""
+    labels: List[DictionaryLabel]
+    datasets: List[ChartDataset]
+
+
 class EmployeeMetricsChartResponse(BaseModel):
     """Схема ответа для метрик сотрудников в формате Chart.js"""
     labels: List[str]
