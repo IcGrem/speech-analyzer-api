@@ -968,6 +968,7 @@ async def highlight_all_dialogs(
 async def highlight_dialogs_by_dictionary(
     dictionary_id: UUID,
     organization_id: Optional[UUID] = Query(None, description="ID организации (если не указан, используется организация текущего пользователя)"),
+    use_expression_search: bool = Query(False, description="Использовать поиск по выражениям"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -979,7 +980,7 @@ async def highlight_dialogs_by_dictionary(
         logger.info(f"Запуск подсветки диалогов по словарю {dictionary_id} для организации {organization_id}")
 
         highlighted_dialogs = await dialog_highlighter.highlight_dialogs_by_dictionary(
-            db, dictionary_id, organization_id
+            db, dictionary_id, organization_id, use_expression_search
         )
 
         updated_count = sum(1 for text in highlighted_dialogs.values() if '<span' in text)
@@ -990,7 +991,8 @@ async def highlight_dialogs_by_dictionary(
             "highlighted_count": len(highlighted_dialogs),
             "updated_in_db_count": updated_count,
             "organization_id": organization_id,
-            "dictionary_id": str(dictionary_id)
+            "dictionary_id": str(dictionary_id),
+            "use_expression_search": use_expression_search
         }
 
     except Exception as e:
@@ -1077,6 +1079,7 @@ async def clear_dialog_dictionaries(
 async def populate_all_dialogs_by_dictionary(
     dictionary_id: UUID,
     organization_id: Optional[UUID] = Query(None, description="ID организации (если не указан, используется организация текущего пользователя)"),
+    use_expression_search: bool = Query(False, description="Использовать поиск по выражениям"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
     db: AsyncSession = Depends(get_db)
 ) -> DialogDictionaryPopulateAllResponse:
@@ -1090,7 +1093,8 @@ async def populate_all_dialogs_by_dictionary(
         result = await dialog_dictionary_populator.populate_all_dialogs_by_dictionary(
             db=db,
             dictionary_id=dictionary_id,
-            organization_id=organization_id
+            organization_id=organization_id,
+            use_expression_search=use_expression_search
         )
 
         return DialogDictionaryPopulateAllResponse(**result)

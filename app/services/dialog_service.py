@@ -3,10 +3,12 @@ import json
 import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set
+import re
 from pathlib import Path
 import aiohttp
 import aiofiles
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update, delete
 from uuid import UUID
 from pydub import AudioSegment
 
@@ -19,6 +21,8 @@ from app.core.logging import LoggerMixin
 from app.crud.audio_data import audio_data_crud, audio_data_for_analysis_crud
 from app.crud.users import employee_crud
 from app.schemas.users import EmployeeCreate
+from app.models.dialogs import Phrase, Dictionary, Dialog, DialogDictionary
+from app.models.users import Employee
 
 # Инициализация компонентов natasha
 MORPH = MorphVocab()
@@ -109,7 +113,7 @@ def get_word_forms_natasha(word: str) -> Set[str]:
 
 def extract_words_from_text_natasha(text: str) -> List[Dict[str, Any]]:
     """Извлекает слова из текста с их позициями и нормальными формами используя natasha"""
-    import re
+    
     
     if not text:
         return []
@@ -250,7 +254,7 @@ def get_word_forms(word: str) -> Set[str]:
 
 def extract_words_from_text_fallback(text: str) -> List[Dict[str, Any]]:
     """Fallback метод для извлечения слов из текста (старый метод)"""
-    import re
+    
     
     if not text:
         return []
@@ -916,14 +920,15 @@ class DialogTextHighlighter(LoggerMixin):
     def __init__(self):
         self._phrase_cache = None
         self._dictionary_cache = None
+        self._phrase_expression_cache = None
     
     async def _load_phrases_and_dictionaries(self, db: AsyncSession) -> Dict[str, Dict[str, Any]]:
         """Загружает все фразы и словари в кэш с поддержкой однокоренных слов"""
         if self._phrase_cache is not None:
             return self._phrase_cache
         
-        from app.models.dialogs import Phrase, Dictionary
-        from sqlalchemy import select
+        
+        
         
         # Загружаем все фразы с их словарями
         query = select(
@@ -969,7 +974,7 @@ class DialogTextHighlighter(LoggerMixin):
     
     def _find_phrases_in_text(self, text: str, phrase_cache: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Находит все фразы из словарей в тексте с поддержкой однокоренных слов"""
-        import re
+        
         
         found_phrases = []
         text_lower = text.lower()
@@ -1044,9 +1049,90 @@ class DialogTextHighlighter(LoggerMixin):
         
         return filtered_phrases
     
+    async def _load_phrase_expressions(self, db: AsyncSession) -> List[Dict[str, Any]]:
+        """Загружает выражения (как есть) из поля phrase с данными словаря для точного поиска по целой фразе"""
+        if self._phrase_expression_cache is not None:
+            return self._phrase_expression_cache
+        
+        
+        query = select(
+            Phrase.phrase,
+            Dictionary.id,
+            Dictionary.title,
+            Dictionary.color
+        ).join(Dictionary, Phrase.dictionary_id == Dictionary.id)
+        result = await db.execute(query)
+        rows = result.fetchall()
+        expressions: List[Dict[str, Any]] = []
+        for row in rows:
+            if not row.phrase:
+                continue
+            expressions.append({
+                'phrase': row.phrase,
+                'dictionary_info': {
+                    'dictionary_id': row.id,
+                    'title': row.title,
+                    'color': row.color or '#000000'
+                }
+            })
+        self._phrase_expression_cache = expressions
+        return expressions
+
+    def _find_phrase_expressions_in_text(self, text: str, expressions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации и разбора по словам)"""
+        
+        if not text or not expressions:
+            return []
+
+        matches: List[Dict[str, Any]] = []
+
+        # Сначала сортируем выражения по длине (длинные вперёд), чтобы минимизировать частичные перекрытия
+        sorted_exprs = sorted(expressions, key=lambda e: len(e['phrase']), reverse=True)
+
+        for item in sorted_exprs:
+            phrase = item['phrase']
+            if not phrase:
+                continue
+            # Готовим regex: экранируем части фразы и соединяем их через \s+ (гибкие пробелы), учитываем границы слова
+            parts = re.split(r"\s+", phrase.strip())
+            escaped_parts = [re.escape(p) for p in parts if p]
+            core = r"\s+".join(escaped_parts) if escaped_parts else re.escape(phrase.strip())
+            pattern = rf"(?<!\w){core}(?!\w)"
+            try:
+                for m in re.finditer(pattern, text, flags=re.IGNORECASE | re.UNICODE):
+                    start, end = m.span()
+                    matches.append({
+                        'phrase': text[start:end],
+                        'start_pos': start,
+                        'end_pos': end,
+                        'dictionary_info': item['dictionary_info']
+                    })
+            except re.error:
+                # В случае проблем с regex — пропускаем конкретную фразу
+                continue
+
+        if not matches:
+            return []
+
+        # Сортируем по позиции начала
+        matches.sort(key=lambda x: (x['start_pos'], -(x['end_pos'] - x['start_pos'])))
+
+        # Удаляем перекрытия: оставляем наиболее длинные, появившиеся раньше
+        filtered: List[Dict[str, Any]] = []
+        last_end = -1
+        for m in matches:
+            if m['start_pos'] >= last_end:
+                filtered.append(m)
+                last_end = m['end_pos']
+            else:
+                # Перекрывается с предыдущим — оставляем тот, что уже в списке (он длиннее или раньше)
+                continue
+
+        return filtered
+
     def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
         """Проверяет, что найденная фраза является отдельным словом/фразой"""
-        import re
+        
         
         # Определяем границы слова
         word_boundary_pattern = r'\b'
@@ -1117,8 +1203,7 @@ class DialogTextHighlighter(LoggerMixin):
     async def highlight_dialog_text(self, db: AsyncSession, dialog_id: UUID) -> Optional[str]:
         """Подсвечивает текст диалога найденными фразами из словарей и обновляет его в БД"""
         try:
-            from app.models.dialogs import Dialog
-            from sqlalchemy import select, update
+            
             
             # Получаем диалог
             query = select(Dialog).where(Dialog.id == dialog_id)
@@ -1156,12 +1241,43 @@ class DialogTextHighlighter(LoggerMixin):
             await db.rollback()
             return None
     
+    async def highlight_dialog_text_by_phrase_expression(self, db: AsyncSession, dialog_id: UUID) -> Optional[str]:
+        """Подсвечивает текст диалога, ища точные вхождения выражений из phrase (без нормализации)"""
+        try:
+            
+
+            query = select(Dialog).where(Dialog.id == dialog_id)
+            result = await db.execute(query)
+            dialog = result.scalar_one_or_none()
+            if not dialog:
+                self.logger.warning(f"Диалог с ID {dialog_id} не найден")
+                return None
+
+            expressions = await self._load_phrase_expressions(db)
+            found = self._find_phrase_expressions_in_text(dialog.conversation, expressions)
+            if not found:
+                self.logger.info(f"В диалоге {dialog_id} нет совпадений по точным выражениям")
+                return dialog.conversation
+
+            highlighted_text = self._highlight_text_with_phrases(dialog.conversation, found)
+
+            stmt = update(Dialog).where(Dialog.id == dialog_id).values(conversation=highlighted_text)
+            await db.execute(stmt)
+            await db.commit()
+
+            self.logger.info(
+                f"В диалоге {dialog_id} найдено и подсвечено {len(found)} выражений (точный поиск), обновлено в БД"
+            )
+            return highlighted_text
+        except Exception as e:
+            self.logger.error(f"Ошибка при точной подсветке выражений в диалоге {dialog_id}: {e}")
+            await db.rollback()
+            return None
+
     async def highlight_all_dialogs(self, db: AsyncSession, organization_id: Optional[UUID] = None) -> Dict[UUID, str]:
         """Подсвечивает текст всех диалогов организации и обновляет их в БД"""
         try:
-            from app.models.dialogs import Dialog
-            from app.models.users import Employee
-            from sqlalchemy import select, update
+            
             
             # Формируем запрос
             query = select(Dialog.id, Dialog.conversation).join(Employee, Dialog.employee_id == Employee.id)
@@ -1223,13 +1339,20 @@ class DialogTextHighlighter(LoggerMixin):
         self,
         db: AsyncSession,
         dictionary_id: UUID,
-        organization_id: Optional[UUID] = None
+        organization_id: Optional[UUID] = None,
+        use_expression_search: bool = False
     ) -> Dict[UUID, str]:
-        """Подсвечивает текст диалогов организации только словами из указанного словаря и обновляет их в БД"""
+        """Подсвечивает текст диалогов организации по указанному словарю и обновляет их в БД.
+
+        Args:
+            db: сессия БД.
+            dictionary_id: целевой словарь.
+            organization_id: опционально ограничить диалоги организацией.
+            use_expression_search: если True — использовать точный поиск по целым выражениям из phrase,
+                если False — использовать существующий поиск по нормализованным словам/формам.
+        """
         try:
-            from app.models.dialogs import Dialog, DialogDictionary
-            from app.models.users import Employee
-            from sqlalchemy import select, update
+            
 
             # Получаем только те диалоги, которые связаны со словарём через dialog_dictionary
             query = (
@@ -1248,40 +1371,70 @@ class DialogTextHighlighter(LoggerMixin):
                 self.logger.info("Не найдено диалогов для подсветки по словарю")
                 return {}
 
-            # Загружаем кэш фраз и фильтруем по словарю
-            phrase_cache = await self._load_phrases_and_dictionaries(db)
-            filtered_cache = {
-                phrase: info for phrase, info in phrase_cache.items() if info.get('dictionary_id') == dictionary_id
-            }
-
-            if not filtered_cache:
-                self.logger.info(f"Для словаря {dictionary_id} нет фраз")
-                return {}
-
             highlighted_dialogs: Dict[UUID, str] = {}
             updated_count = 0
 
-            for dialog in dialogs:
-                try:
-                    found_phrases = self._find_phrases_in_text(dialog.conversation, filtered_cache)
-                    if found_phrases:
-                        highlighted_text = self._highlight_text_with_phrases(dialog.conversation, found_phrases)
-                        highlighted_dialogs[dialog.id] = highlighted_text
+            if use_expression_search:
+                # Новый режим: точный поиск по выражениям из phrase
+                expressions = await self._load_phrase_expressions(db)
+                filtered_expressions = [
+                    e for e in expressions if e['dictionary_info'].get('dictionary_id') == dictionary_id
+                ]
+                if not filtered_expressions:
+                    self.logger.info(f"Для словаря {dictionary_id} нет выражений")
+                    return {}
 
-                        # Обновляем запись в БД
-                        stmt = update(Dialog).where(Dialog.id == dialog.id).values(conversation=highlighted_text)
-                        await db.execute(stmt)
-                        updated_count += 1
-                        self.logger.info(
-                            f"В диалоге {dialog.id} подсвечено {len(found_phrases)} фраз по словарю {dictionary_id}"
+                for dialog in dialogs:
+                    try:
+                        found = self._find_phrase_expressions_in_text(dialog.conversation, filtered_expressions)
+                        if found:
+                            highlighted_text = self._highlight_text_with_phrases(dialog.conversation, found)
+                            highlighted_dialogs[dialog.id] = highlighted_text
+                            stmt = update(Dialog).where(Dialog.id == dialog.id).values(conversation=highlighted_text)
+                            await db.execute(stmt)
+                            updated_count += 1
+                            self.logger.info(
+                                f"В диалоге {dialog.id} подсвечено {len(found)} выражений по словарю {dictionary_id} (точный поиск)"
+                            )
+                        else:
+                            highlighted_dialogs[dialog.id] = dialog.conversation
+                    except Exception as e:
+                        self.logger.error(
+                            f"Ошибка при точной подсветке диалога {dialog.id} по словарю {dictionary_id}: {e}"
                         )
-                    else:
                         highlighted_dialogs[dialog.id] = dialog.conversation
-                except Exception as e:
-                    self.logger.error(
-                        f"Ошибка при подсветке диалога {dialog.id} по словарю {dictionary_id}: {e}"
-                    )
-                    highlighted_dialogs[dialog.id] = dialog.conversation
+            else:
+                # Старый режим: поиск по нормализованным словам/формам
+                phrase_cache = await self._load_phrases_and_dictionaries(db)
+                filtered_cache = {
+                    phrase: info for phrase, info in phrase_cache.items() if info.get('dictionary_id') == dictionary_id
+                }
+
+                if not filtered_cache:
+                    self.logger.info(f"Для словаря {dictionary_id} нет фраз")
+                    return {}
+
+                for dialog in dialogs:
+                    try:
+                        found_phrases = self._find_phrases_in_text(dialog.conversation, filtered_cache)
+                        if found_phrases:
+                            highlighted_text = self._highlight_text_with_phrases(dialog.conversation, found_phrases)
+                            highlighted_dialogs[dialog.id] = highlighted_text
+
+                            # Обновляем запись в БД
+                            stmt = update(Dialog).where(Dialog.id == dialog.id).values(conversation=highlighted_text)
+                            await db.execute(stmt)
+                            updated_count += 1
+                            self.logger.info(
+                                f"В диалоге {dialog.id} подсвечено {len(found_phrases)} фраз по словарю {dictionary_id}"
+                            )
+                        else:
+                            highlighted_dialogs[dialog.id] = dialog.conversation
+                    except Exception as e:
+                        self.logger.error(
+                            f"Ошибка при подсветке диалога {dialog.id} по словарю {dictionary_id}: {e}"
+                        )
+                        highlighted_dialogs[dialog.id] = dialog.conversation
 
             await db.commit()
             self.logger.info(
@@ -1298,6 +1451,7 @@ class DialogTextHighlighter(LoggerMixin):
         """Очищает кэш фраз и словарей"""
         self._phrase_cache = None
         self._dictionary_cache = None
+        self._phrase_expression_cache = None
 
 
 # Создаем экземпляр сервиса подсветки
@@ -1309,14 +1463,14 @@ class DialogDictionaryPopulator(LoggerMixin):
     
     def __init__(self):
         self._phrase_cache = None
+        self._phrase_expression_cache = None
     
     async def _load_phrases_and_dictionaries(self, db: AsyncSession) -> Dict[str, Dict[str, Any]]:
         """Загружает все фразы и словари в кэш с поддержкой однокоренных слов"""
         if self._phrase_cache is not None:
             return self._phrase_cache
         
-        from app.models.dialogs import Phrase, Dictionary
-        from sqlalchemy import select
+        
         
         # Загружаем все фразы с их словарями
         query = select(
@@ -1362,7 +1516,7 @@ class DialogDictionaryPopulator(LoggerMixin):
     
     def _find_phrases_in_text(self, text: str, phrase_cache: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Находит все фразы из словарей в тексте с поддержкой однокоренных слов"""
-        import re
+        
         
         found_phrases = []
         text_lower = text.lower()
@@ -1437,9 +1591,77 @@ class DialogDictionaryPopulator(LoggerMixin):
         
         return filtered_phrases
     
+    async def _load_phrase_expressions(self, db: AsyncSession) -> List[Dict[str, Any]]:
+        """Загружает выражения (как есть) из поля phrase с данными словаря для точного поиска по целой фразе"""
+        if self._phrase_expression_cache is not None:
+            return self._phrase_expression_cache
+        
+        query = select(
+            Phrase.phrase,
+            Dictionary.id,
+            Dictionary.title,
+            Dictionary.color
+        ).join(Dictionary, Phrase.dictionary_id == Dictionary.id)
+        result = await db.execute(query)
+        rows = result.fetchall()
+        expressions: List[Dict[str, Any]] = []
+        for row in rows:
+            if not row.phrase:
+                continue
+            expressions.append({
+                'phrase': row.phrase,
+                'dictionary_info': {
+                    'dictionary_id': row.id,
+                    'title': row.title,
+                    'color': row.color or '#000000'
+                }
+            })
+        self._phrase_expression_cache = expressions
+        return expressions
+
+    def _find_phrase_expressions_in_text(self, text: str, expressions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации)"""
+        
+        if not text or not expressions:
+            return []
+
+        matches: List[Dict[str, Any]] = []
+        sorted_exprs = sorted(expressions, key=lambda e: len(e['phrase']), reverse=True)
+        for item in sorted_exprs:
+            phrase = item['phrase']
+            if not phrase:
+                continue
+            parts = re.split(r"\s+", phrase.strip())
+            escaped_parts = [re.escape(p) for p in parts if p]
+            core = r"\s+".join(escaped_parts) if escaped_parts else re.escape(phrase.strip())
+            pattern = rf"(?<!\w){core}(?!\w)"
+            try:
+                for m in re.finditer(pattern, text, flags=re.IGNORECASE | re.UNICODE):
+                    start, end = m.span()
+                    matches.append({
+                        'phrase': text[start:end],
+                        'start_pos': start,
+                        'end_pos': end,
+                        'dictionary_info': item['dictionary_info']
+                    })
+            except re.error:
+                continue
+
+        if not matches:
+            return []
+
+        matches.sort(key=lambda x: (x['start_pos'], -(x['end_pos'] - x['start_pos'])))
+        filtered: List[Dict[str, Any]] = []
+        last_end = -1
+        for m in matches:
+            if m['start_pos'] >= last_end:
+                filtered.append(m)
+                last_end = m['end_pos']
+        return filtered
+
     def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
         """Проверяет, что найденная фраза является отдельным словом/фразой"""
-        import re
+        
         
         # Определяем границы слова
         word_boundary_pattern = r'\b'
@@ -1460,8 +1682,7 @@ class DialogDictionaryPopulator(LoggerMixin):
     
     async def _get_existing_dialog_dictionaries(self, db: AsyncSession, dialog_id: UUID) -> Set[UUID]:
         """Получает существующие связи диалога со словарями"""
-        from app.models.dialogs import DialogDictionary
-        from sqlalchemy import select
+        
         
         query = select(DialogDictionary.dictionary_id).where(DialogDictionary.dialog_id == dialog_id)
         result = await db.execute(query)
@@ -1470,8 +1691,7 @@ class DialogDictionaryPopulator(LoggerMixin):
     async def populate_dialog_dictionary(self, db: AsyncSession, dialog_id: UUID) -> Dict[str, Any]:
         """Заполняет таблицу dialog_dictionary для конкретного диалога"""
         try:
-            from app.models.dialogs import Dialog, DialogDictionary
-            from sqlalchemy import select
+            
             
             # Получаем диалог
             query = select(Dialog).where(Dialog.id == dialog_id)
@@ -1538,13 +1758,55 @@ class DialogDictionaryPopulator(LoggerMixin):
             self.logger.error(f"Ошибка при заполнении dialog_dictionary для диалога {dialog_id}: {e}")
             await db.rollback()
             return {"success": False, "message": f"Ошибка: {str(e)}", "added_count": 0}
+
+    async def populate_dialog_dictionary_by_phrase_expression(self, db: AsyncSession, dialog_id: UUID) -> Dict[str, Any]:
+        """Заполняет dialog_dictionary для диалога, используя точный поиск по expressions (phrase)"""
+        try:
+            
+
+            query = select(Dialog).where(Dialog.id == dialog_id)
+            result = await db.execute(query)
+            dialog = result.scalar_one_or_none()
+            if not dialog:
+                self.logger.warning(f"Диалог с ID {dialog_id} не найден")
+                return {"success": False, "message": "Диалог не найден", "added_count": 0}
+
+            expressions = await self._load_phrase_expressions(db)
+            found = self._find_phrase_expressions_in_text(dialog.conversation, expressions)
+            if not found:
+                return {"success": True, "message": "Фразы не найдены", "added_count": 0}
+
+            existing_dictionary_ids = await self._get_existing_dialog_dictionaries(db, dialog_id)
+            found_dictionary_ids = {p['dictionary_info']['dictionary_id'] for p in found}
+            new_dictionary_ids = found_dictionary_ids - existing_dictionary_ids
+            if not new_dictionary_ids:
+                return {
+                    "success": True,
+                    "message": "Все связи уже существуют",
+                    "added_count": 0,
+                    "total_found": len(found_dictionary_ids)
+                }
+
+            new_records = [DialogDictionary(dialog_id=dialog_id, dictionary_id=d_id) for d_id in new_dictionary_ids]
+            db.add_all(new_records)
+            await db.commit()
+            self.logger.info(f"Для диалога {dialog_id} добавлено {len(new_records)} новых связей (точный поиск)")
+            return {
+                "success": True,
+                "message": f"Добавлено {len(new_records)} новых связей",
+                "added_count": len(new_records),
+                "total_found": len(found_dictionary_ids),
+                "found_phrases_count": len(found)
+            }
+        except Exception as e:
+            self.logger.error(f"Ошибка при заполнении dialog_dictionary (точный поиск) для диалога {dialog_id}: {e}")
+            await db.rollback()
+            return {"success": False, "message": f"Ошибка: {str(e)}", "added_count": 0}
     
     async def populate_all_dialogs_dictionaries(self, db: AsyncSession, organization_id: Optional[UUID] = None) -> Dict[str, Any]:
         """Заполняет таблицу dialog_dictionary для всех диалогов организации"""
         try:
-            from app.models.dialogs import Dialog
-            from app.models.users import Employee
-            from sqlalchemy import select
+            
             
             # Формируем запрос
             query = select(Dialog.id, Dialog.conversation).join(Employee, Dialog.employee_id == Employee.id)
@@ -1609,8 +1871,7 @@ class DialogDictionaryPopulator(LoggerMixin):
     async def clear_dialog_dictionaries(self, db: AsyncSession, dialog_id: Optional[UUID] = None) -> Dict[str, Any]:
         """Очищает связи диалогов со словарями"""
         try:
-            from app.models.dialogs import DialogDictionary
-            from sqlalchemy import delete
+            
             
             if dialog_id:
                 # Удаляем связи для конкретного диалога
@@ -1654,12 +1915,12 @@ class DialogDictionaryPopulator(LoggerMixin):
         self,
         db: AsyncSession,
         dialog_id: UUID,
-        dictionary_id: UUID
+        dictionary_id: UUID,
+        use_expression_search: bool = False
     ) -> Dict[str, Any]:
         """Заполняет связь dialog_dictionary для конкретного диалога ТОЛЬКО по указанному словарю"""
         try:
-            from app.models.dialogs import Dialog, DialogDictionary
-            from sqlalchemy import select
+            
 
             # Получаем диалог
             query = select(Dialog).where(Dialog.id == dialog_id)
@@ -1670,14 +1931,17 @@ class DialogDictionaryPopulator(LoggerMixin):
                 self.logger.warning(f"Диалог с ID {dialog_id} не найден")
                 return {"success": False, "message": "Диалог не найден", "added_count": 0}
 
-            # Загружаем фразы и словари
-            phrase_cache = await self._load_phrases_and_dictionaries(db)
-
-            # Находим фразы в тексте
-            found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
-
-            # Фильтруем по нужному словарю
-            filtered_phrases = [p for p in found_phrases if p['dictionary_info']['dictionary_id'] == dictionary_id]
+            if use_expression_search:
+                expressions = await self._load_phrase_expressions(db)
+                found_all = self._find_phrase_expressions_in_text(dialog.conversation, expressions)
+                filtered_phrases = [p for p in found_all if p['dictionary_info']['dictionary_id'] == dictionary_id]
+            else:
+                # Загружаем фразы и словари
+                phrase_cache = await self._load_phrases_and_dictionaries(db)
+                # Находим фразы в тексте
+                found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
+                # Фильтруем по нужному словарю
+                filtered_phrases = [p for p in found_phrases if p['dictionary_info']['dictionary_id'] == dictionary_id]
 
             if not filtered_phrases:
                 self.logger.info(f"В диалоге {dialog_id} не найдено фраз из словаря {dictionary_id}")
@@ -1731,13 +1995,12 @@ class DialogDictionaryPopulator(LoggerMixin):
         self,
         db: AsyncSession,
         dictionary_id: UUID,
-        organization_id: Optional[UUID] = None
+        organization_id: Optional[UUID] = None,
+        use_expression_search: bool = False
     ) -> Dict[str, Any]:
         """Заполняет dialog_dictionary для всех диалогов организации ТОЛЬКО по указанному словарю"""
         try:
-            from app.models.dialogs import Dialog, DialogDictionary
-            from app.models.users import Employee
-            from sqlalchemy import select
+            
 
             # Выбираем диалоги
             query = select(Dialog.id, Dialog.conversation).join(Employee, Dialog.employee_id == Employee.id)
@@ -1756,24 +2019,35 @@ class DialogDictionaryPopulator(LoggerMixin):
                     "total_added": 0
                 }
 
-            # Загружаем кэш фраз
-            phrase_cache = await self._load_phrases_and_dictionaries(db)
-
             processed_count = 0
             total_added = 0
             errors: list[str] = []
 
             for dialog in dialogs:
                 try:
-                    # Находим фразы
-                    found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
-                    has_target_dict = any(
-                        p['dictionary_info']['dictionary_id'] == dictionary_id for p in found_phrases
-                    )
-
-                    if not has_target_dict:
-                        processed_count += 1
-                        continue
+                    if use_expression_search:
+                        expressions = await self._load_phrase_expressions(db)
+                        filtered_expressions = [
+                            e for e in expressions if e['dictionary_info']['dictionary_id'] == dictionary_id
+                        ]
+                        if not filtered_expressions:
+                            processed_count += 1
+                            continue
+                        found = self._find_phrase_expressions_in_text(dialog.conversation, filtered_expressions)
+                        if not found:
+                            processed_count += 1
+                            continue
+                    else:
+                        # Загружаем кэш фраз
+                        phrase_cache = await self._load_phrases_and_dictionaries(db)
+                        # Находим фразы
+                        found_phrases = self._find_phrases_in_text(dialog.conversation, phrase_cache)
+                        has_target_dict = any(
+                            p['dictionary_info']['dictionary_id'] == dictionary_id for p in found_phrases
+                        )
+                        if not has_target_dict:
+                            processed_count += 1
+                            continue
 
                     # Проверяем существование связи
                     exists_query = select(DialogDictionary).where(
@@ -1818,6 +2092,7 @@ class DialogDictionaryPopulator(LoggerMixin):
     def clear_cache(self):
         """Очищает кэш фраз и словарей"""
         self._phrase_cache = None
+        self._phrase_expression_cache = None
 
 
 # Создаем экземпляр сервиса заполнения словарей
