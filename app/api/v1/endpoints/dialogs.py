@@ -964,9 +964,9 @@ async def highlight_all_dialogs(
         )
 
 
-@router.post("/highlight-dialogs-by-dictionary/{dictionary_id}", description="Подсветка диалогов организации по конкретному словарю")
+@router.post("/highlight-dialogs-by-dictionary", description="Подсветка диалогов организации по конкретному словарю, или всем словарям")
 async def highlight_dialogs_by_dictionary(
-    dictionary_id: UUID,
+    dictionary_id: Optional[UUID] = Query(None, description="ID словаря (если не указан, подсвечиваются все словари)"),
     organization_id: Optional[UUID] = Query(None, description="ID организации (если не указан, используется организация текущего пользователя)"),
     use_expression_search: bool = Query(False, description="Использовать поиск по выражениям"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
@@ -977,13 +977,23 @@ async def highlight_dialogs_by_dictionary(
         if organization_id is None:
             organization_id = current_user.organization_id
 
-        logger.info(f"Запуск подсветки диалогов по словарю {dictionary_id} для организации {organization_id}")
+        if dictionary_id is None:
+            logger.info(f"Запуск подсветки диалогов по всем словарям для организации {organization_id}")
+            dictionaries = await dialog_crud.get_all_dictionaries(db, organization_id)
+            for dict in dictionaries:
+                highlighted_dialogs = await dialog_highlighter.highlight_dialogs_by_dictionary(
+                    db, dict.id, organization_id, use_expression_search
+                )
+                updated_count = sum(1 for text in highlighted_dialogs.values() if '<span' in text)
+                logger.info(f"Подсвечено {len(highlighted_dialogs)} диалогов по словарю {dict.id}, обновлено в БД: {updated_count}")
 
-        highlighted_dialogs = await dialog_highlighter.highlight_dialogs_by_dictionary(
-            db, dictionary_id, organization_id, use_expression_search
-        )
-
-        updated_count = sum(1 for text in highlighted_dialogs.values() if '<span' in text)
+        else:
+            logger.info(f"Запуск подсветки диалогов по словарю {dictionary_id} для организации {organization_id}")
+            highlighted_dialogs = await dialog_highlighter.highlight_dialogs_by_dictionary(
+                db, dictionary_id, organization_id, use_expression_search
+            )
+            updated_count = sum(1 for text in highlighted_dialogs.values() if '<span' in text)
+            logger.info(f"Подсвечено {len(highlighted_dialogs)} диалогов по словарю {dictionary_id}, обновлено в БД: {updated_count}")
 
         return {
             "success": True,
@@ -991,7 +1001,6 @@ async def highlight_dialogs_by_dictionary(
             "highlighted_count": len(highlighted_dialogs),
             "updated_in_db_count": updated_count,
             "organization_id": organization_id,
-            "dictionary_id": str(dictionary_id),
             "use_expression_search": use_expression_search
         }
 
@@ -1075,9 +1084,9 @@ async def clear_dialog_dictionaries(
         )
 
 
-@router.post("/populate-all-dialogs-by_dictionary/{dictionary_id}", response_model=DialogDictionaryPopulateAllResponse, description="Заполнить dialog_dictionary для всех диалогов организации по конкретному словарю")
+@router.post("/populate-all-dialogs-by_dictionary", response_model=DialogDictionaryPopulateAllResponse, description="Заполнить dialog_dictionary для всех диалогов организации по конкретному словарю, или всем словарям")
 async def populate_all_dialogs_by_dictionary(
-    dictionary_id: UUID,
+    dictionary_id: Optional[UUID] = Query(None, description="ID словаря (если не указан, заполняются все словари)"),
     organization_id: Optional[UUID] = Query(None, description="ID организации (если не указан, используется организация текущего пользователя)"),
     use_expression_search: bool = Query(False, description="Использовать поиск по выражениям"),
     current_user: UserResponse = Security(get_current_user, scopes=['admin', 'operator']),
@@ -1085,18 +1094,31 @@ async def populate_all_dialogs_by_dictionary(
 ) -> DialogDictionaryPopulateAllResponse:
     """Заполнить связи dialog_dictionary по одному словарю для всех диалогов организации"""
     try:
+
         if organization_id is None:
             organization_id = current_user.organization_id
 
-        logger.info(f"Запуск заполнения dialog_dictionary по словарю {dictionary_id} для организации {organization_id}")
+        if dictionary_id is None:
+            logger.info(f"Запуск заполнения dialog_dictionary по всем словарям для организации {organization_id}")
+            dictionaries = await dialog_crud.get_all_dictionaries(db, organization_id)
+            for dict in dictionaries:
+                result = await dialog_dictionary_populator.populate_all_dialogs_by_dictionary(
+                    db=db,
+                    dictionary_id=dict.id,
+                    organization_id=organization_id,
+                    use_expression_search=use_expression_search
+                )
+                logger.info(f"Заполнено {result['processed_count']} диалогов по словарю {dict.id}")
 
-        result = await dialog_dictionary_populator.populate_all_dialogs_by_dictionary(
-            db=db,
-            dictionary_id=dictionary_id,
-            organization_id=organization_id,
-            use_expression_search=use_expression_search
-        )
-
+        else:
+            logger.info(f"Запуск заполнения dialog_dictionary по словарю {dictionary_id} для организации {organization_id}")
+            result = await dialog_dictionary_populator.populate_all_dialogs_by_dictionary(
+                db=db,
+                dictionary_id=dictionary_id,
+                organization_id=organization_id,
+                use_expression_search=use_expression_search
+            )
+            logger.info(f"Заполнено {result['processed_count']} диалогов по словарю {dictionary_id}")
         return DialogDictionaryPopulateAllResponse(**result)
 
     except Exception as e:
