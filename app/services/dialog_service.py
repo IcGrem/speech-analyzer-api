@@ -1078,32 +1078,44 @@ class DialogTextHighlighter(LoggerMixin):
         self._phrase_expression_cache = expressions
         return expressions
 
-
-    def _remove_client_replicas(self, text: str) -> str:
+    async def _find_client_replicas(self, text: str) -> List[Tuple[int, int]]:
         """
-        Убирает все реплики клиента из форматированных диалогов.
+        Находит диапазоны (start, end) всех реплик клиента в тексте.
         """
-        # Удаляем строки, начинающиеся с "Клиент:"
-        return re.sub(r"^Клиент:.*\n?", "", text, flags=re.MULTILINE)
+        ranges: List[Tuple[int, int]] = []
+        for m in re.finditer(r"^Клиент:.*(?:\n|$)", text, flags=re.MULTILINE):
+            ranges.append(m.span())
+        return ranges
 
-    def _find_phrase_expressions_in_text(self, text: str, expressions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации и разбора по словам)"""
-        
+    async def _is_in_client_range(self, pos: int, client_ranges: List[Tuple[int, int]]) -> bool:
+        """
+        Проверяет, находится ли позиция внутри диапазона клиента.
+        """
+        for start, end in client_ranges:
+            if start <= pos < end:
+                return True
+        return False
+
+    async def _find_phrase_expressions_in_text(
+        self, text: str, expressions: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации),
+        игнорируя клиентские реплики.
+        """
+
         if not text or not expressions:
             return []
 
-        text = self._remove_client_replicas(text)
+        # получаем диапазоны текста клиента
+        client_ranges = await self._find_client_replicas(text)
 
         matches: List[Dict[str, Any]] = []
-
-        # Сначала сортируем выражения по длине (длинные вперёд), чтобы минимизировать частичные перекрытия
         sorted_exprs = sorted(expressions, key=lambda e: len(e['phrase']), reverse=True)
-
         for item in sorted_exprs:
             phrase = item['phrase']
             if not phrase:
                 continue
-            # Готовим regex: экранируем части фразы и соединяем их через \s+ (гибкие пробелы), учитываем границы слова
+
             parts = re.split(r"\s+", phrase.strip())
             escaped_parts = [re.escape(p) for p in parts if p]
             core = r"\s+".join(escaped_parts) if escaped_parts else re.escape(phrase.strip())
@@ -1111,6 +1123,11 @@ class DialogTextHighlighter(LoggerMixin):
             try:
                 for m in re.finditer(pattern, text, flags=re.IGNORECASE | re.UNICODE):
                     start, end = m.span()
+
+                    # проверяем, не попало ли совпадение внутрь реплики клиента
+                    if await self._is_in_client_range(start, client_ranges):
+                        continue
+
                     matches.append({
                         'phrase': text[start:end],
                         'start_pos': start,
@@ -1118,26 +1135,19 @@ class DialogTextHighlighter(LoggerMixin):
                         'dictionary_info': item['dictionary_info']
                     })
             except re.error:
-                # В случае проблем с regex — пропускаем конкретную фразу
                 continue
 
         if not matches:
             return []
 
-        # Сортируем по позиции начала
+        # сортировка и фильтрация пересечений
         matches.sort(key=lambda x: (x['start_pos'], -(x['end_pos'] - x['start_pos'])))
-
-        # Удаляем перекрытия: оставляем наиболее длинные, появившиеся раньше
         filtered: List[Dict[str, Any]] = []
         last_end = -1
         for m in matches:
             if m['start_pos'] >= last_end:
                 filtered.append(m)
                 last_end = m['end_pos']
-            else:
-                # Перекрывается с предыдущим — оставляем тот, что уже в списке (он длиннее или раньше)
-                continue
-
         return filtered
 
     # def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
@@ -1166,7 +1176,7 @@ class DialogTextHighlighter(LoggerMixin):
         if not found_phrases:
             return text
         
-        text = self._remove_client_replicas(text)
+        # text = self._remove_client_replicas(text)
         
         # Создаем список изменений (позиция, тип, данные)
         changes = []
@@ -1257,7 +1267,6 @@ class DialogTextHighlighter(LoggerMixin):
         """Подсвечивает текст диалога, ища точные вхождения выражений из phrase (без нормализации)"""
         try:
             
-
             query = select(Dialog).where(Dialog.id == dialog_id)
             result = await db.execute(query)
             dialog = result.scalar_one_or_none()
@@ -1532,7 +1541,7 @@ class DialogDictionaryPopulator(LoggerMixin):
         
         found_phrases = []
 
-        text = self._remove_client_replicas(text)
+        # text = self._remove_client_replicas(text)
         
         # Извлекаем слова из текста с их нормальными формами
         text_words = extract_words_from_text(text)
