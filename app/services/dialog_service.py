@@ -1078,11 +1078,21 @@ class DialogTextHighlighter(LoggerMixin):
         self._phrase_expression_cache = expressions
         return expressions
 
+
+    def _remove_client_replicas(self, text: str) -> str:
+        """
+        Убирает все реплики клиента из форматированных диалогов.
+        """
+        # Удаляем строки, начинающиеся с "Клиент:"
+        return re.sub(r"^Клиент:.*\n?", "", text, flags=re.MULTILINE)
+
     def _find_phrase_expressions_in_text(self, text: str, expressions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации и разбора по словам)"""
         
         if not text or not expressions:
             return []
+
+        text = self._remove_client_replicas(text)
 
         matches: List[Dict[str, Any]] = []
 
@@ -1130,31 +1140,33 @@ class DialogTextHighlighter(LoggerMixin):
 
         return filtered
 
-    def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
-        """Проверяет, что найденная фраза является отдельным словом/фразой"""
+    # def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
+    #     """Проверяет, что найденная фраза является отдельным словом/фразой"""
         
         
-        # Определяем границы слова
-        word_boundary_pattern = r'\b'
+    #     # Определяем границы слова
+    #     word_boundary_pattern = r'\b'
         
-        # Проверяем начало
-        if start_pos > 0:
-            before_text = text[:start_pos]
-            if not re.search(r'\W$', before_text) and not re.search(r'\s$', before_text):
-                return False
+    #     # Проверяем начало
+    #     if start_pos > 0:
+    #         before_text = text[:start_pos]
+    #         if not re.search(r'\W$', before_text) and not re.search(r'\s$', before_text):
+    #             return False
         
-        # Проверяем конец
-        if end_pos < len(text):
-            after_text = text[end_pos:]
-            if not re.search(r'^\W', after_text) and not re.search(r'^\s', after_text):
-                return False
+    #     # Проверяем конец
+    #     if end_pos < len(text):
+    #         after_text = text[end_pos:]
+    #         if not re.search(r'^\W', after_text) and not re.search(r'^\s', after_text):
+    #             return False
         
-        return True
+    #     return True
     
     def _highlight_text_with_phrases(self, text: str, found_phrases: List[Dict[str, Any]]) -> str:
         """Подсвечивает найденные фразы в тексте HTML-тегами"""
         if not found_phrases:
             return text
+        
+        text = self._remove_client_replicas(text)
         
         # Создаем список изменений (позиция, тип, данные)
         changes = []
@@ -1519,7 +1531,8 @@ class DialogDictionaryPopulator(LoggerMixin):
         
         
         found_phrases = []
-        text_lower = text.lower()
+
+        text = self._remove_client_replicas(text)
         
         # Извлекаем слова из текста с их нормальными формами
         text_words = extract_words_from_text(text)
@@ -1619,11 +1632,20 @@ class DialogDictionaryPopulator(LoggerMixin):
         self._phrase_expression_cache = expressions
         return expressions
 
+    def _remove_client_replicas(self, text: str) -> str:
+        """
+        Убирает все реплики клиента из форматированных диалогов.
+        """
+        # Удаляем строки, начинающиеся с "Клиент:"
+        return re.sub(r"^Клиент:.*\n?", "", text, flags=re.MULTILINE)
+
     def _find_phrase_expressions_in_text(self, text: str, expressions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации)"""
         
         if not text or not expressions:
             return []
+
+        text = self._remove_client_replicas(text)
 
         matches: List[Dict[str, Any]] = []
         sorted_exprs = sorted(expressions, key=lambda e: len(e['phrase']), reverse=True)
@@ -1659,26 +1681,26 @@ class DialogDictionaryPopulator(LoggerMixin):
                 last_end = m['end_pos']
         return filtered
 
-    def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
-        """Проверяет, что найденная фраза является отдельным словом/фразой"""
+    # def _is_word_boundary(self, text: str, start_pos: int, end_pos: int) -> bool:
+    #     """Проверяет, что найденная фраза является отдельным словом/фразой"""
         
         
-        # Определяем границы слова
-        word_boundary_pattern = r'\b'
+    #     # Определяем границы слова
+    #     word_boundary_pattern = r'\b'
         
-        # Проверяем начало
-        if start_pos > 0:
-            before_text = text[:start_pos]
-            if not re.search(r'\W$', before_text) and not re.search(r'\s$', before_text):
-                return False
+    #     # Проверяем начало
+    #     if start_pos > 0:
+    #         before_text = text[:start_pos]
+    #         if not re.search(r'\W$', before_text) and not re.search(r'\s$', before_text):
+    #             return False
         
-        # Проверяем конец
-        if end_pos < len(text):
-            after_text = text[end_pos:]
-            if not re.search(r'^\W', after_text) and not re.search(r'^\s', after_text):
-                return False
+    #     # Проверяем конец
+    #     if end_pos < len(text):
+    #         after_text = text[end_pos:]
+    #         if not re.search(r'^\W', after_text) and not re.search(r'^\s', after_text):
+    #             return False
         
-        return True
+    #     return True
     
     async def _get_existing_dialog_dictionaries(self, db: AsyncSession, dialog_id: UUID) -> Set[UUID]:
         """Получает существующие связи диалога со словарями"""
