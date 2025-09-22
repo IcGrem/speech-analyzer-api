@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 import re
 from pathlib import Path
 import aiohttp
@@ -1632,20 +1632,38 @@ class DialogDictionaryPopulator(LoggerMixin):
         self._phrase_expression_cache = expressions
         return expressions
 
-    def _remove_client_replicas(self, text: str) -> str:
+    async def _find_client_replicas(self, text: str) -> List[Tuple[int, int]]:
         """
-        Убирает все реплики клиента из форматированных диалогов.
+        Находит диапазоны (start, end) всех реплик клиента в тексте.
         """
-        # Удаляем строки, начинающиеся с "Клиент:"
-        return re.sub(r"^Клиент:.*\n?", "", text, flags=re.MULTILINE)
+        ranges: List[Tuple[int, int]] = []
+        for m in re.finditer(r"^Клиент:.*(?:\n|$)", text, flags=re.MULTILINE):
+            ranges.append(m.span())
+        return ranges
 
-    def _find_phrase_expressions_in_text(self, text: str, expressions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации)"""
-        
+
+    async def _is_in_client_range(self, pos: int, client_ranges: List[Tuple[int, int]]) -> bool:
+        """
+        Проверяет, находится ли позиция внутри диапазона клиента.
+        """
+        for start, end in client_ranges:
+            if start <= pos < end:
+                return True
+        return False
+
+
+    async def _find_phrase_expressions_in_text(
+        self, text: str, expressions: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации),
+        игнорируя клиентские реплики.
+        """
+
         if not text or not expressions:
             return []
 
-        text = self._remove_client_replicas(text)
+        # получаем диапазоны текста клиента
+        client_ranges = await self._find_client_replicas(text)
 
         matches: List[Dict[str, Any]] = []
         sorted_exprs = sorted(expressions, key=lambda e: len(e['phrase']), reverse=True)
@@ -1653,6 +1671,7 @@ class DialogDictionaryPopulator(LoggerMixin):
             phrase = item['phrase']
             if not phrase:
                 continue
+
             parts = re.split(r"\s+", phrase.strip())
             escaped_parts = [re.escape(p) for p in parts if p]
             core = r"\s+".join(escaped_parts) if escaped_parts else re.escape(phrase.strip())
@@ -1660,6 +1679,11 @@ class DialogDictionaryPopulator(LoggerMixin):
             try:
                 for m in re.finditer(pattern, text, flags=re.IGNORECASE | re.UNICODE):
                     start, end = m.span()
+
+                    # проверяем, не попало ли совпадение внутрь реплики клиента
+                    if await self._is_in_client_range(start, client_ranges):
+                        continue
+
                     matches.append({
                         'phrase': text[start:end],
                         'start_pos': start,
@@ -1672,6 +1696,7 @@ class DialogDictionaryPopulator(LoggerMixin):
         if not matches:
             return []
 
+        # сортировка и фильтрация пересечений
         matches.sort(key=lambda x: (x['start_pos'], -(x['end_pos'] - x['start_pos'])))
         filtered: List[Dict[str, Any]] = []
         last_end = -1
@@ -1794,7 +1819,7 @@ class DialogDictionaryPopulator(LoggerMixin):
                 return {"success": False, "message": "Диалог не найден", "added_count": 0}
 
             expressions = await self._load_phrase_expressions(db)
-            found = self._find_phrase_expressions_in_text(dialog.conversation, expressions)
+            found = await self._find_phrase_expressions_in_text(dialog.conversation, expressions)
             if not found:
                 return {"success": True, "message": "Фразы не найдены", "added_count": 0}
 
@@ -1955,7 +1980,7 @@ class DialogDictionaryPopulator(LoggerMixin):
 
             if use_expression_search:
                 expressions = await self._load_phrase_expressions(db)
-                found_all = self._find_phrase_expressions_in_text(dialog.conversation, expressions)
+                found_all = await self._find_phrase_expressions_in_text(dialog.conversation, expressions)
                 filtered_phrases = [p for p in found_all if p['dictionary_info']['dictionary_id'] == dictionary_id]
             else:
                 # Загружаем фразы и словари
@@ -2055,7 +2080,7 @@ class DialogDictionaryPopulator(LoggerMixin):
                         if not filtered_expressions:
                             processed_count += 1
                             continue
-                        found = self._find_phrase_expressions_in_text(dialog.conversation, filtered_expressions)
+                        found = await self._find_phrase_expressions_in_text(dialog.conversation, filtered_expressions)
                         if not found:
                             processed_count += 1
                             continue
