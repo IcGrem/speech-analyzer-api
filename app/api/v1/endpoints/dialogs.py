@@ -1102,6 +1102,7 @@ async def populate_all_dialogs_by_dictionary(
             logger.info(f"Запуск заполнения dialog_dictionary по всем словарям для организации {organization_id}")
             dictionaries = await dialog_crud.get_all_dictionaries(db)
             for dict in dictionaries:
+                logger.info(f"Текущий словарь {dict.description}")
                 result = await dialog_dictionary_populator.populate_all_dialogs_by_dictionary(
                     db=db,
                     dictionary_id=dict.id,

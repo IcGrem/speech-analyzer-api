@@ -794,7 +794,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         """Получить все словари с сотрудниками c фильтрацией по организации. На выходе список id словарей"""
         query = select(Dictionary)
         result = await db.execute(query)
-        return result.fetchall()
+        return result.scalars().all()
 
 # Создаем экземпляр для использования в сервисах
 dialog_crud = CRUDDialog(Dialog)
