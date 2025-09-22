@@ -979,7 +979,7 @@ async def highlight_dialogs_by_dictionary(
 
         if dictionary_id is None:
             logger.info(f"Запуск подсветки диалогов по всем словарям для организации {organization_id}")
-            dictionaries = await dialog_crud.get_all_dictionaries(db, organization_id)
+            dictionaries = await dialog_crud.get_all_dictionaries(db)
             for dict in dictionaries:
                 highlighted_dialogs = await dialog_highlighter.highlight_dialogs_by_dictionary(
                     db, dict.id, organization_id, use_expression_search
@@ -1100,7 +1100,7 @@ async def populate_all_dialogs_by_dictionary(
 
         if dictionary_id is None:
             logger.info(f"Запуск заполнения dialog_dictionary по всем словарям для организации {organization_id}")
-            dictionaries = await dialog_crud.get_all_dictionaries(db, organization_id)
+            dictionaries = await dialog_crud.get_all_dictionaries(db)
             for dict in dictionaries:
                 result = await dialog_dictionary_populator.populate_all_dialogs_by_dictionary(
                     db=db,
