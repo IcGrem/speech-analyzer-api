@@ -1078,7 +1078,7 @@ class DialogTextHighlighter(LoggerMixin):
         self._phrase_expression_cache = expressions
         return expressions
 
-    async def _find_client_replicas(self, text: str) -> List[Tuple[int, int]]:
+    def _find_client_replicas(self, text: str) -> List[Tuple[int, int]]:
         """
         Находит диапазоны (start, end) всех реплик клиента в тексте.
         """
@@ -1087,7 +1087,7 @@ class DialogTextHighlighter(LoggerMixin):
             ranges.append(m.span())
         return ranges
 
-    async def _is_in_client_range(self, pos: int, client_ranges: List[Tuple[int, int]]) -> bool:
+    def _is_in_client_range(self, pos: int, client_ranges: List[Tuple[int, int]]) -> bool:
         """
         Проверяет, находится ли позиция внутри диапазона клиента.
         """
@@ -1107,7 +1107,7 @@ class DialogTextHighlighter(LoggerMixin):
             return []
 
         # получаем диапазоны текста клиента
-        client_ranges = await self._find_client_replicas(text)
+        client_ranges = self._find_client_replicas(text)
 
         matches: List[Dict[str, Any]] = []
         sorted_exprs = sorted(expressions, key=lambda e: len(e['phrase']), reverse=True)
@@ -1125,7 +1125,7 @@ class DialogTextHighlighter(LoggerMixin):
                     start, end = m.span()
 
                     # проверяем, не попало ли совпадение внутрь реплики клиента
-                    if await self._is_in_client_range(start, client_ranges):
+                    if self._is_in_client_range(start, client_ranges):
                         continue
 
                     matches.append({
@@ -1641,7 +1641,7 @@ class DialogDictionaryPopulator(LoggerMixin):
         self._phrase_expression_cache = expressions
         return expressions
 
-    async def _find_client_replicas(self, text: str) -> List[Tuple[int, int]]:
+    def _find_client_replicas(self, text: str) -> List[Tuple[int, int]]:
         """
         Находит диапазоны (start, end) всех реплик клиента в тексте.
         """
@@ -1651,7 +1651,7 @@ class DialogDictionaryPopulator(LoggerMixin):
         return ranges
 
 
-    async def _is_in_client_range(self, pos: int, client_ranges: List[Tuple[int, int]]) -> bool:
+    def _is_in_client_range(self, pos: int, client_ranges: List[Tuple[int, int]]) -> bool:
         """
         Проверяет, находится ли позиция внутри диапазона клиента.
         """
@@ -1672,7 +1672,7 @@ class DialogDictionaryPopulator(LoggerMixin):
             return []
 
         # получаем диапазоны текста клиента
-        client_ranges = await self._find_client_replicas(text)
+        client_ranges = self._find_client_replicas(text)
 
         matches: List[Dict[str, Any]] = []
         sorted_exprs = sorted(expressions, key=lambda e: len(e['phrase']), reverse=True)
@@ -1690,7 +1690,7 @@ class DialogDictionaryPopulator(LoggerMixin):
                     start, end = m.span()
 
                     # проверяем, не попало ли совпадение внутрь реплики клиента
-                    if await self._is_in_client_range(start, client_ranges):
+                    if self._is_in_client_range(start, client_ranges):
                         continue
 
                     matches.append({
