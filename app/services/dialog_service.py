@@ -1096,7 +1096,7 @@ class DialogTextHighlighter(LoggerMixin):
                 return True
         return False
 
-    async def _find_phrase_expressions_in_text(
+    def _find_phrase_expressions_in_text(
         self, text: str, expressions: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации),
@@ -1661,7 +1661,7 @@ class DialogDictionaryPopulator(LoggerMixin):
         return False
 
 
-    async def _find_phrase_expressions_in_text(
+    def _find_phrase_expressions_in_text(
         self, text: str, expressions: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Ищет и возвращает совпадения по полным выражениям из phrase (без лемматизации),
@@ -1828,7 +1828,7 @@ class DialogDictionaryPopulator(LoggerMixin):
                 return {"success": False, "message": "Диалог не найден", "added_count": 0}
 
             expressions = await self._load_phrase_expressions(db)
-            found = await self._find_phrase_expressions_in_text(dialog.conversation, expressions)
+            found = self._find_phrase_expressions_in_text(dialog.conversation, expressions)
             if not found:
                 return {"success": True, "message": "Фразы не найдены", "added_count": 0}
 
@@ -1989,7 +1989,7 @@ class DialogDictionaryPopulator(LoggerMixin):
 
             if use_expression_search:
                 expressions = await self._load_phrase_expressions(db)
-                found_all = await self._find_phrase_expressions_in_text(dialog.conversation, expressions)
+                found_all = self._find_phrase_expressions_in_text(dialog.conversation, expressions)
                 filtered_phrases = [p for p in found_all if p['dictionary_info']['dictionary_id'] == dictionary_id]
             else:
                 # Загружаем фразы и словари
@@ -2089,7 +2089,7 @@ class DialogDictionaryPopulator(LoggerMixin):
                         if not filtered_expressions:
                             processed_count += 1
                             continue
-                        found = await self._find_phrase_expressions_in_text(dialog.conversation, filtered_expressions)
+                        found = self._find_phrase_expressions_in_text(dialog.conversation, filtered_expressions)
                         if not found:
                             processed_count += 1
                             continue
