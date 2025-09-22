@@ -791,9 +791,11 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         return list(dictionaries.values())
 
     async def get_all_dictionaries(self, db: AsyncSession, organization_id: UUID) -> List[Dict[str, Any]]:
-        """Получить все словари с сотрудниками c фильтрацией по организации. На выходе список словарей"""
+        """Получить все словари с сотрудниками c фильтрацией по организации. На выходе список id словарей"""
         query = select(
-            Dictionary.id
+            Dictionary.id,
+        ).join(
+            Employee, Dictionary.employee_id == Employee.id
         ).where(
             Employee.organization_id == organization_id
         )
@@ -801,4 +803,4 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         return result.fetchall()
 
 # Создаем экземпляр для использования в сервисах
-dialog_crud = CRUDDialog(Dialog) 
+dialog_crud = CRUDDialog(Dialog)
