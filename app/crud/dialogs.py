@@ -617,28 +617,6 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         total_count = total_count_result.scalar()
         
         total_page = (total_count + size - 1) // size
-        offset = (page - 1) * size
-        
-        # Применяем сортировку
-        if sort_by == "recording_start_date":
-            sort_column = Dialog.recording_start_date
-        elif sort_by == "overall_score":
-            sort_column = Dialog.overall_score
-        elif sort_by == "employee_name":
-            sort_column = Employee.first_name
-        else:
-            sort_column = Dialog.recording_start_date  # По умолчанию
-        
-        if sort_order.lower() == "asc":
-            main_query = base_query.order_by(Dialog.id, sort_column.asc()).offset(offset).limit(size)
-        else:
-            main_query = base_query.order_by(Dialog.id, sort_column.desc()).offset(offset).limit(size)
-        result = await db.execute(main_query)
-        rows = result.fetchall()
-        
-        # Получаем ID диалогов для запроса словарей
-        dialog_ids = [row.id for row in rows]
-        get_logger(__name__).info(f'DIALOG IDS - {dialog_ids}')
         
         # Запрос для получения словарей для всех диалогов
         dictionaries_query = select(
