@@ -587,9 +587,9 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             sort_column = Dialog.recording_start_date  # По умолчанию
         
         if sort_order.lower() == "asc":
-            main_query = base_query.order_by(sort_column.asc()).offset(offset).limit(size)
+            main_query = base_query.order_by(Dialog.id, sort_column.asc()).offset(offset).limit(size)
         else:
-            main_query = base_query.order_by(sort_column.desc()).offset(offset).limit(size)
+            main_query = base_query.order_by(Dialog.id, sort_column.desc()).offset(offset).limit(size)
         result = await db.execute(main_query)
         rows = result.fetchall()
         
