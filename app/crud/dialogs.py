@@ -532,7 +532,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         """Получить диалоги с пагинацией и фильтрами"""
 
         # Базовый запрос с оконной функцией: нумеруем строки в каждой группе Dialog.id
-        subq = (
+        inner = (
             select(
                 Dialog.id,
                 Dialog.recording_start_date,
@@ -540,59 +540,52 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
                 Dialog.conversation_type,
                 Employee.first_name,
                 Employee.last_name,
-                func.row_number().over(
-                    partition_by=Dialog.id,
-                    order_by=Dialog.recording_start_date.desc()  # берем самую свежую запись
-                ).label("rn"),
             )
             .join(Employee, Dialog.employee_id == Employee.id)
             .where(Employee.organization_id == organization_id)
         )
 
-        # Фильтры
-        if dictionary_id:
-            subq = subq.join(
-                DialogDictionary, Dialog.id == DialogDictionary.dialog_id
-            ).where(
-                DialogDictionary.dictionary_id == dictionary_id
-            )
+        # фильтры (не делаем join с DialogDictionary здесь — если нужен фильтр, используем IN/EXISTS,
+        # чтобы не умножать строки)
         if start_date:
-            subq = subq.where(Dialog.recording_start_date >= start_date)
+            inner = inner.where(Dialog.recording_start_date >= start_date)
         if end_date:
-            subq = subq.where(Dialog.recording_start_date <= end_date)
+            inner = inner.where(Dialog.recording_start_date <= end_date)
         if employee_ids:
-            subq = subq.where(Employee.id.in_(employee_ids))
+            inner = inner.where(Employee.id.in_(employee_ids))
         if conversation_type:
-            subq = subq.where(Dialog.conversation_type == conversation_type)
+            inner = inner.where(Dialog.conversation_type == conversation_type)
 
-        subq = subq.subquery()
-        sub_alias = aliased(subq)
+        # Если нужен фильтр по dictionary_id — лучше через подзапрос (IN/EXISTS), а не JOIN:
+        if dictionary_id:
+            dict_sub = select(DialogDictionary.dialog_id).where(
+                DialogDictionary.dictionary_id == dictionary_id
+            ).subquery()
+            inner = inner.where(Dialog.id.in_(dict_sub))
 
-        # Оставляем только первую строку для каждого Dialog.id
-        base_query = select(sub_alias).where(sub_alias.c.rn == 1)
+        # Выбираем по одному ряду на Dialog.id: берём самый свежий по recording_start_date
+        inner = inner.distinct(Dialog.id).order_by(Dialog.id, Dialog.recording_start_date.desc()).subquery()
+        
+        # Подготовка сортировки для внешнего запроса (outer)
+        sort_map = {
+            "recording_start_date": inner.c.recording_start_date,
+            "overall_score": inner.c.overall_score,
+            "employee_name": inner.c.first_name,  # при желании можно сортировать по last_name и т.д.
+        }
+        sort_col = sort_map.get(sort_by, inner.c.recording_start_date)
 
-        # Подсчет общего количества
-        count_query = select(func.count()).select_from(base_query.subquery())
-        total_count_result = await db.execute(count_query)
-        total_count = total_count_result.scalar()
+        # count по результату distinct
+        total_count = (await db.execute(select(func.count()).select_from(inner))).scalar() or 0
         total_page = (total_count + size - 1) // size
         offset = (page - 1) * size
 
-        # Сопоставляем sort_by с колонками
-        sort_map = {
-            "recording_start_date": sub_alias.c.recording_start_date,
-            "overall_score": sub_alias.c.overall_score,
-            "employee_name": sub_alias.c.first_name,  # у тебя сортировка по имени
-        }
-        sort_column = sort_map.get(sort_by, sub_alias.c.recording_start_date)
-
-        # Сортировка
+        # внешний запрос: сортировка и пагинация
         if sort_order.lower() == "asc":
-            main_query = base_query.order_by(sort_column.asc()).offset(offset).limit(size)
+            main_q = select(inner).order_by(sort_col.asc()).offset(offset).limit(size)
         else:
-            main_query = base_query.order_by(sort_column.desc()).offset(offset).limit(size)
+            main_q = select(inner).order_by(sort_col.desc()).offset(offset).limit(size)
 
-        result = await db.execute(main_query)
+        result = await db.execute(main_q)
         rows = result.fetchall()
 
         # Получаем ID диалогов
