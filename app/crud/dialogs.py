@@ -543,9 +543,13 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
                     partition_by=Dialog.id,
                     order_by=Dialog.recording_start_date.desc()
                 ).label("rn"),
+                ).join(
+                    Employee, Dialog.employee_id == Employee.id
+                )   # 👈 фильтр через join
+                .where(
+                    Employee.organization_id == organization_id
+                )  # 👈 правильный фильтр
             )
-            .where(Dialog.organization_id == organization_id)  # если у Dialog есть org_id напрямую
-        )
 
         # Фильтры по диалогам
         if start_date:
