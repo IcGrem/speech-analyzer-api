@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 from sqlalchemy.orm import selectinload, aliased
 
 from app.crud.base import CRUDBase
