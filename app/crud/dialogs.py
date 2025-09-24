@@ -531,8 +531,8 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     ) -> Dict[str, Any]:
         """Получить диалоги с пагинацией и фильтрами"""
         
-        # Сначала создаем подзапрос для получения уникальных ID с правильной сортировкой
-        subquery = select(Dialog.id).join(
+        # ЗАПРОС ДЛЯ ПОДСЧЕТА ОБЩЕГО КОЛИЧЕСТВА (без сортировки)
+        count_query = select(func.count(Dialog.id.distinct())).join(
             Employee, Dialog.employee_id == Employee.id
         ).where(
             Employee.organization_id == organization_id
@@ -540,43 +540,21 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         
         # Добавляем JOIN для фильтра по словарю
         if dictionary_id:
-            subquery = subquery.join(
+            count_query = count_query.join(
                 DialogDictionary, Dialog.id == DialogDictionary.dialog_id
-            ).where(
-                DialogDictionary.dictionary_id == dictionary_id
-            )
+            ).where(DialogDictionary.dictionary_id == dictionary_id)
         
-        # Применяем фильтры
+        # Применяем фильтры к count_query
         if start_date:
-            subquery = subquery.where(Dialog.recording_start_date >= start_date)
+            count_query = count_query.where(Dialog.recording_start_date >= start_date)
         if end_date:
-            subquery = subquery.where(Dialog.recording_start_date <= end_date)
+            count_query = count_query.where(Dialog.recording_start_date <= end_date)
         if employee_ids:
-            subquery = subquery.where(Employee.id.in_(employee_ids))
+            count_query = count_query.where(Employee.id.in_(employee_ids))
         if conversation_type:
-            subquery = subquery.where(Dialog.conversation_type == conversation_type)
+            count_query = count_query.where(Dialog.conversation_type == conversation_type)
         
-        # Определяем столбец для сортировки
-        if sort_by == "recording_start_date":
-            sort_column = Dialog.recording_start_date
-        elif sort_by == "overall_score":
-            sort_column = Dialog.overall_score
-        elif sort_by == "employee_name":
-            sort_column = Employee.first_name
-        else:
-            sort_column = Dialog.recording_start_date
-        
-        # Применяем сортировку к подзапросу
-        if sort_order.lower() == "asc":
-            subquery = subquery.order_by(sort_column.asc())
-        else:
-            subquery = subquery.order_by(sort_column.desc())
-        
-        # Делаем подзапрос уникальным
-        subquery = subquery.distinct(Dialog.id)
-        
-        # Запрос для подсчета общего количества
-        count_query = select(func.count()).select_from(subquery.subquery())
+        # Выполняем запрос для подсчета общего количества
         total_count_result = await db.execute(count_query)
         total_count = total_count_result.scalar()
         
@@ -594,75 +572,127 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
                 "data": []
             }
         
-        # Применяем пагинацию к подзапросу
-        paginated_subquery = subquery.offset(offset).limit(size)
+        # ЗАПРОС ДЛЯ ПОЛУЧЕНИЯ ID С ПРАВИЛЬНОЙ СОРТИРОВКОЙ
+        distinct_query = select(Dialog.id).join(
+            Employee, Dialog.employee_id == Employee.id
+        ).where(
+            Employee.organization_id == organization_id
+        )
+        
+        # Добавляем JOIN для фильтра по словарю
+        if dictionary_id:
+            distinct_query = distinct_query.join(
+                DialogDictionary, Dialog.id == DialogDictionary.dialog_id
+            ).where(DialogDictionary.dictionary_id == dictionary_id)
+        
+        # Применяем фильтры к distinct_query
+        if start_date:
+            distinct_query = distinct_query.where(Dialog.recording_start_date >= start_date)
+        if end_date:
+            distinct_query = distinct_query.where(Dialog.recording_start_date <= end_date)
+        if employee_ids:
+            distinct_query = distinct_query.where(Employee.id.in_(employee_ids))
+        if conversation_type:
+            distinct_query = distinct_query.where(Dialog.conversation_type == conversation_type)
+        
+        # Определяем столбец для сортировки
+        if sort_by == "recording_start_date":
+            sort_column = Dialog.recording_start_date
+        elif sort_by == "overall_score":
+            sort_column = Dialog.overall_score
+        elif sort_by == "employee_name":
+            sort_column = Employee.first_name
+        else:
+            sort_column = Dialog.recording_start_date
+        
+        # Применяем сортировку с DISTINCT ON (правильный порядок)
+        if sort_order.lower() == "asc":
+            distinct_query = distinct_query.distinct(Dialog.id).order_by(
+                Dialog.id,  # Первым должен быть столбец из DISTINCT ON
+                sort_column.asc()
+            )
+        else:
+            distinct_query = distinct_query.distinct(Dialog.id).order_by(
+                Dialog.id,  # Первым должен быть столбец из DISTINCT ON
+                sort_column.desc()
+            )
+        
+        # Применяем пагинацию
+        distinct_query = distinct_query.offset(offset).limit(size)
         
         # Выполняем запрос для получения ID
-        id_result = await db.execute(paginated_subquery)
-        dialog_ids = [row[0] for row in id_result.fetchall()]
+        distinct_result = await db.execute(distinct_query)
+        dialog_ids = [row[0] for row in distinct_result.fetchall()]
         
-        # Теперь получаем полные данные для этих ID, сохраняя порядок из подзапроса
         if not dialog_ids:
-            data = []
-        else:
-            # Создаем CASE выражение для сохранения порядка сортировки
-            case_stmt = case(
-                {dialog_id: index for index, dialog_id in enumerate(dialog_ids)},
-                value=Dialog.id
-            )
-            
-            main_query = select(
-                Dialog.id,
-                Dialog.recording_start_date,
-                Dialog.overall_score,
-                Dialog.conversation_type,
-                Employee.first_name,
-                Employee.last_name
-            ).join(
-                Employee, Dialog.employee_id == Employee.id
-            ).where(
-                Dialog.id.in_(dialog_ids)
-            ).order_by(case_stmt)
-            
-            result = await db.execute(main_query)
-            rows = result.fetchall()
-            
-            # Запрос для получения словарей для всех диалогов
-            dictionaries_query = select(
-                DialogDictionary.dialog_id,
-                Dictionary.description,
-                Dictionary.color
-            ).join(
-                Dictionary, DialogDictionary.dictionary_id == Dictionary.id
-            ).where(
-                DialogDictionary.dialog_id.in_(dialog_ids)
-            )
-            dictionaries_result = await db.execute(dictionaries_query)
-            dictionaries_rows = dictionaries_result.fetchall()
-            
-            # Группируем словари по dialog_id
-            dialog_dictionaries = {}
-            for row in dictionaries_rows:
-                if row.dialog_id not in dialog_dictionaries:
-                    dialog_dictionaries[row.dialog_id] = []
-                dialog_dictionaries[row.dialog_id].append({
-                    'color': row.color,
-                    'description': row.description
-                })
-            
-            # Формируем данные
-            data = []
-            for row in rows:
-                employee_name = f"{row.first_name} {row.last_name}"
-                dictionaries = dialog_dictionaries.get(row.id, [])
-                data.append({
-                    "date": row.recording_start_date,
-                    "employee_name": employee_name,
-                    "dialog_id": row.id,
-                    "conversation_type": row.conversation_type,
-                    "overall_score": float(row.overall_score) if row.overall_score is not None else None,
-                    "dictionaries": dictionaries
-                })
+            return {
+                "total_count": total_count,
+                "total_page": total_page,
+                "page": page,
+                "size": size,
+                "data": []
+            }
+        
+        # ТЕПЕРЬ ПОЛУЧАЕМ ПОЛНЫЕ ДАННЫЯ ДЛЯ ЭТИХ ID
+        main_query = select(
+            Dialog.id,
+            Dialog.recording_start_date,
+            Dialog.overall_score,
+            Dialog.conversation_type,
+            Employee.first_name,
+            Employee.last_name
+        ).join(
+            Employee, Dialog.employee_id == Employee.id
+        ).where(
+            Dialog.id.in_(dialog_ids)
+        )
+        
+        # Сохраняем порядок из оригинального запроса с помощью CASE
+        case_ordering = case(
+            {dialog_id: index for index, dialog_id in enumerate(dialog_ids)},
+            value=Dialog.id
+        )
+        main_query = main_query.order_by(case_ordering)
+        
+        result = await db.execute(main_query)
+        rows = result.fetchall()
+        
+        # Запрос для получения словарей для всех диалогов
+        dictionaries_query = select(
+            DialogDictionary.dialog_id,
+            Dictionary.description,
+            Dictionary.color
+        ).join(
+            Dictionary, DialogDictionary.dictionary_id == Dictionary.id
+        ).where(
+            DialogDictionary.dialog_id.in_(dialog_ids)
+        )
+        dictionaries_result = await db.execute(dictionaries_query)
+        dictionaries_rows = dictionaries_result.fetchall()
+        
+        # Группируем словари по dialog_id
+        dialog_dictionaries = {}
+        for row in dictionaries_rows:
+            if row.dialog_id not in dialog_dictionaries:
+                dialog_dictionaries[row.dialog_id] = []
+            dialog_dictionaries[row.dialog_id].append({
+                'color': row.color,
+                'description': row.description
+            })
+        
+        # Формируем данные
+        data = []
+        for row in rows:
+            employee_name = f"{row.first_name} {row.last_name}"
+            dictionaries = dialog_dictionaries.get(row.id, [])
+            data.append({
+                "date": row.recording_start_date,
+                "employee_name": employee_name,
+                "dialog_id": row.id,
+                "conversation_type": row.conversation_type,
+                "overall_score": float(row.overall_score) if row.overall_score is not None else None,
+                "dictionaries": dictionaries
+            })
         
         return {
             "total_count": total_count,
