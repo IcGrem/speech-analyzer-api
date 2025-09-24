@@ -545,7 +545,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             Employee.organization_id == organization_id
         )
         prom_result = await db.execute(base_query)
-        res = prom_result.scalar()
+        res = prom_result.fetchall()
         get_logger(__name__).info(f'DASE QUERY - {res}')
         # Добавляем JOIN для фильтра по словарю, если он указан
         if dictionary_id:
