@@ -601,18 +601,22 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         # Применяем сортировку к подзапросу
         if sort_by == "recording_start_date":
             sort_column = Dialog.recording_start_date
+            secondary_sort = Dialog.id  # добавляем уникальный столбец для стабильности
         elif sort_by == "overall_score":
             sort_column = Dialog.overall_score
+            secondary_sort = Dialog.id
         elif sort_by == "employee_name":
             sort_column = Employee.first_name
+            secondary_sort = Dialog.id
         else:
             sort_column = Dialog.recording_start_date
-        
-        # Добавляем вторичную сортировку по ID для детерминированности
+            secondary_sort = Dialog.id
+
+        # Применяем сортировку
         if sort_order.lower() == "asc":
-            dialog_subquery = dialog_subquery.order_by(sort_column.asc(), Dialog.id.asc())
+            main_query = base_query.order_by(sort_column.asc(), secondary_sort.asc()).offset(offset).limit(size)
         else:
-            dialog_subquery = dialog_subquery.order_by(sort_column.desc(), Dialog.id.desc())
+            main_query = base_query.order_by(sort_column.desc(), secondary_sort.asc()).offset(offset).limit(size)
         
         # Запрос для подсчета общего количества (используем DISTINCT для устранения дубликатов)
         count_subquery = dialog_subquery.with_only_columns(Dialog.id).distinct().subquery()
