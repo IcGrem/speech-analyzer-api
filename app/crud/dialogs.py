@@ -591,6 +591,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         
         # Получаем ID диалогов для запроса словарей
         dialog_ids = [row.id for row in rows]
+        get_logger(__name__).info(f'DIALOG IDS - {dialog_ids}')
         
         # Запрос для получения словарей для всех диалогов
         dictionaries_query = select(
