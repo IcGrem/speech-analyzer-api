@@ -530,7 +530,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     ) -> Dict[str, Any]:
         """Получить диалоги с пагинацией и фильтрами"""
         
-        # Базовый запрос для получения диалогов с JOIN и фильтрами
+        # Базовый запрос для получения диалогов с фильтрами по организации, сотруднику и диапазону дат
         base_query = select(
             Dialog.id,
             Dialog.recording_start_date,
@@ -543,7 +543,9 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         ).where(
             Employee.organization_id == organization_id
         )
-        
+        prom_result = await db.execute(base_query)
+        res = prom_result.fetchall()
+        get_logger(__name__).info(f'DASE QUERY - {res}')
         # Добавляем JOIN для фильтра по словарю, если он указан
         if dictionary_id:
             base_query = base_query.where(
@@ -565,40 +567,16 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         if conversation_type:
             base_query = base_query.where(Dialog.conversation_type == conversation_type)
         
-        # ПОДЗАПРОС: Получаем уникальные ID диалогов с правильной сортировкой
-        # Сначала создаем подзапрос для ID с сортировкой
-        dialog_subquery = select(
-            Dialog.id,
-            Dialog.recording_start_date,
-            Dialog.overall_score,
-            Employee.first_name
-        ).join(
-            Employee, Dialog.employee_id == Employee.id
-        ).where(
-            Employee.organization_id == organization_id
-        )
+        # Запрос для подсчета общего количества
+        count_query = select(func.count()).select_from(base_query.subquery())
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
         
-        # Применяем те же фильтры к подзапросу
-        if dictionary_id:
-            dialog_subquery = dialog_subquery.where(
-                exists().where(
-                    and_(
-                        DialogDictionary.dialog_id == Dialog.id,
-                        DialogDictionary.dictionary_id == dictionary_id
-                    )
-                )
-            )
+        # Вычисляем пагинацию
+        total_page = (total_count + size - 1) // size  # Округление вверх
+        offset = (page - 1) * size
         
-        if start_date:
-            dialog_subquery = dialog_subquery.where(Dialog.recording_start_date >= start_date)
-        if end_date:
-            dialog_subquery = dialog_subquery.where(Dialog.recording_start_date <= end_date)
-        if employee_ids:
-            dialog_subquery = dialog_subquery.where(Employee.id.in_(employee_ids))
-        if conversation_type:
-            dialog_subquery = dialog_subquery.where(Dialog.conversation_type == conversation_type)
-        
-        # Применяем сортировку к подзапросу
+        # Применяем сортировку
         if sort_by == "recording_start_date":
             sort_column = Dialog.recording_start_date
             secondary_sort = Dialog.id  # добавляем уникальный столбец для стабильности
@@ -617,57 +595,14 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             main_query = base_query.order_by(sort_column.asc(), secondary_sort.asc()).offset(offset).limit(size)
         else:
             main_query = base_query.order_by(sort_column.desc(), secondary_sort.asc()).offset(offset).limit(size)
-        
-        # Запрос для подсчета общего количества (используем DISTINCT для устранения дубликатов)
-        count_subquery = dialog_subquery.with_only_columns(Dialog.id).distinct().subquery()
-        count_query = select(func.count()).select_from(count_subquery)
-        total_count_result = await db.execute(count_query)
-        total_count = total_count_result.scalar()
-        
-        # Вычисляем пагинацию
-        total_page = (total_count + size - 1) // size
-        offset = (page - 1) * size
-        
-        # Получаем ID диалогов с пагинацией
-        dialog_ids_query = dialog_subquery.with_only_columns(Dialog.id).distinct().offset(offset).limit(size)
-        dialog_ids_result = await db.execute(dialog_ids_query)
-        paginated_dialog_ids = [row[0] for row in dialog_ids_result]
-        
-        # Если нет диалогов, возвращаем пустой результат
-        if not paginated_dialog_ids:
-            return {
-                "total_count": total_count,
-                "total_page": total_page,
-                "page": page,
-                "size": size,
-                "data": []
-            }
-        
-        # ОСНОВНОЙ ЗАПРОС: Получаем полные данные для отобранных ID
-        main_query = select(
-            Dialog.id,
-            Dialog.recording_start_date,
-            Dialog.overall_score,
-            Dialog.conversation_type,
-            Employee.first_name,
-            Employee.last_name
-        ).join(
-            Employee, Dialog.employee_id == Employee.id
-        ).where(
-            Dialog.id.in_(paginated_dialog_ids)
-        )
-        
-        # Сохраняем порядок из подзапроса используя CASE expression
-        case_order = case(
-            {dialog_id: index for index, dialog_id in enumerate(paginated_dialog_ids)},
-            value=Dialog.id
-        )
-        main_query = main_query.order_by(case_order)
-        
         result = await db.execute(main_query)
         rows = result.fetchall()
         
-        # Получаем словари для всех диалогов
+        # Получаем ID диалогов для запроса словарей
+        dialog_ids = [row.id for row in rows]
+        get_logger(__name__).info(f'DIALOG IDS - {dialog_ids}')
+        
+        # Запрос для получения словарей для всех диалогов
         dictionaries_query = select(
             DialogDictionary.dialog_id,
             Dictionary.description,
@@ -675,9 +610,8 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         ).join(
             Dictionary, DialogDictionary.dictionary_id == Dictionary.id
         ).where(
-            DialogDictionary.dialog_id.in_(paginated_dialog_ids)
+            DialogDictionary.dialog_id.in_(dialog_ids)
         )
-        
         dictionaries_result = await db.execute(dictionaries_query)
         dictionaries_rows = dictionaries_result.fetchall()
         
