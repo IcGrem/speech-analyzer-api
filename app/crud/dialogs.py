@@ -531,7 +531,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     ) -> Dict[str, Any]:
         """Получить диалоги с пагинацией и фильтрами"""
         
-        # Базовый запрос для получения диалогов с фильтрами по организации, сотруднику и диапазону дат
+        # Базовый запрос с группировкой вместо DISTINCT
         base_query = select(
             Dialog.id,
             Dialog.recording_start_date,
@@ -543,24 +543,29 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             Employee, Dialog.employee_id == Employee.id
         ).where(
             Employee.organization_id == organization_id
-        ).distinct(
-            Dialog.id
+        ).group_by(
+            Dialog.id,
+            Dialog.recording_start_date,
+            Dialog.overall_score,
+            Dialog.conversation_type,
+            Employee.first_name,
+            Employee.last_name
         )
-        prom_result = await db.execute(base_query)
-        res = prom_result.fetchall()
-        get_logger(__name__).info(f'BASE QUERY - {res}')
-        get_logger(__name__).info(f'BASE QUERY LEN - {len(res)}')
+        
         # Добавляем JOIN для фильтра по словарю, если он указан
         if dictionary_id:
             base_query = base_query.join(
                 DialogDictionary, Dialog.id == DialogDictionary.dialog_id
             ).where(
                 DialogDictionary.dictionary_id == dictionary_id
+            ).group_by(
+                Dialog.id,
+                Dialog.recording_start_date,
+                Dialog.overall_score,
+                Dialog.conversation_type,
+                Employee.first_name,
+                Employee.last_name
             )
-            prom_dict_result = await db.execute(base_query)
-            res_dict = prom_dict_result.fetchall()
-            get_logger(__name__).info(f'BASE QUERY + DICT - {res_dict}')
-            get_logger(__name__).info(f'BASE QUERY + DICT LEN - {len(res_dict)}')
         
         # Применяем фильтры
         if start_date:
@@ -573,12 +578,12 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             base_query = base_query.where(Dialog.conversation_type == conversation_type)
         
         # Запрос для подсчета общего количества
-        count_query = select(func.count()).select_from(base_query.subquery())
+        count_query = select(func.count(Dialog.id)).select_from(base_query.subquery())
         total_count_result = await db.execute(count_query)
         total_count = total_count_result.scalar()
         
         # Вычисляем пагинацию
-        total_page = (total_count + size - 1) // size  # Округление вверх
+        total_page = (total_count + size - 1) // size
         offset = (page - 1) * size
         
         # Применяем сортировку
@@ -589,12 +594,13 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         elif sort_by == "employee_name":
             sort_column = Employee.first_name
         else:
-            sort_column = Dialog.recording_start_date  # По умолчанию
+            sort_column = Dialog.recording_start_date
         
         if sort_order.lower() == "asc":
-            main_query = base_query.order_by(Dialog.id, sort_column.asc()).offset(offset).limit(size)
+            main_query = base_query.order_by(sort_column.asc()).offset(offset).limit(size)
         else:
-            main_query = base_query.order_by(Dialog.id, sort_column.desc()).offset(offset).limit(size)
+            main_query = base_query.order_by(sort_column.desc()).offset(offset).limit(size)
+            
         result = await db.execute(main_query)
         rows = result.fetchall()
         
