@@ -557,6 +557,10 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             ).where(
                 DialogDictionary.dictionary_id == dictionary_id
             )
+            prom_dict_result = await db.execute(base_query)
+            res_dict = prom_dict_result.fetchall()
+            get_logger(__name__).info(f'BASE QUERY - {res}')
+            get_logger(__name__).info(f'BASE QUERY LEN - {len(res_dict)}')
         
         # Применяем фильтры
         if start_date:
