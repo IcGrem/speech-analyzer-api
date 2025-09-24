@@ -543,6 +543,8 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
             Employee, Dialog.employee_id == Employee.id
         ).where(
             Employee.organization_id == organization_id
+        ).distinct(
+            Dialog.id
         )
         prom_result = await db.execute(base_query)
         res = prom_result.fetchall()
