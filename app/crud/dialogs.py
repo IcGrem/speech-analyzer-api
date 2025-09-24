@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import exists, select, func, and_, case
 from sqlalchemy.orm import selectinload, aliased
 
 from app.crud.base import CRUDBase
@@ -531,110 +531,8 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     ) -> Dict[str, Any]:
         """Получить диалоги с пагинацией и фильтрами"""
         
-        # ЗАПРОС ДЛЯ ПОДСЧЕТА ОБЩЕГО КОЛИЧЕСТВА (без сортировки)
-        count_query = select(func.count(Dialog.id.distinct())).join(
-            Employee, Dialog.employee_id == Employee.id
-        ).where(
-            Employee.organization_id == organization_id
-        )
-        
-        # Добавляем JOIN для фильтра по словарю
-        if dictionary_id:
-            count_query = count_query.join(
-                DialogDictionary, Dialog.id == DialogDictionary.dialog_id
-            ).where(DialogDictionary.dictionary_id == dictionary_id)
-        
-        # Применяем фильтры к count_query
-        if start_date:
-            count_query = count_query.where(Dialog.recording_start_date >= start_date)
-        if end_date:
-            count_query = count_query.where(Dialog.recording_start_date <= end_date)
-        if employee_ids:
-            count_query = count_query.where(Employee.id.in_(employee_ids))
-        if conversation_type:
-            count_query = count_query.where(Dialog.conversation_type == conversation_type)
-        
-        # Выполняем запрос для подсчета общего количества
-        total_count_result = await db.execute(count_query)
-        total_count = total_count_result.scalar()
-        
-        # Вычисляем пагинацию
-        total_page = (total_count + size - 1) // size
-        offset = (page - 1) * size
-        
-        # Если нет данных, возвращаем пустой результат
-        if total_count == 0:
-            return {
-                "total_count": 0,
-                "total_page": 0,
-                "page": page,
-                "size": size,
-                "data": []
-            }
-        
-        # ЗАПРОС ДЛЯ ПОЛУЧЕНИЯ ID С ПРАВИЛЬНОЙ СОРТИРОВКОЙ
-        distinct_query = select(Dialog.id).join(
-            Employee, Dialog.employee_id == Employee.id
-        ).where(
-            Employee.organization_id == organization_id
-        )
-        
-        # Добавляем JOIN для фильтра по словарю
-        if dictionary_id:
-            distinct_query = distinct_query.join(
-                DialogDictionary, Dialog.id == DialogDictionary.dialog_id
-            ).where(DialogDictionary.dictionary_id == dictionary_id)
-        
-        # Применяем фильтры к distinct_query
-        if start_date:
-            distinct_query = distinct_query.where(Dialog.recording_start_date >= start_date)
-        if end_date:
-            distinct_query = distinct_query.where(Dialog.recording_start_date <= end_date)
-        if employee_ids:
-            distinct_query = distinct_query.where(Employee.id.in_(employee_ids))
-        if conversation_type:
-            distinct_query = distinct_query.where(Dialog.conversation_type == conversation_type)
-        
-        # Определяем столбец для сортировки
-        if sort_by == "recording_start_date":
-            sort_column = Dialog.recording_start_date
-        elif sort_by == "overall_score":
-            sort_column = Dialog.overall_score
-        elif sort_by == "employee_name":
-            sort_column = Employee.first_name
-        else:
-            sort_column = Dialog.recording_start_date
-        
-        # Применяем сортировку с DISTINCT ON (правильный порядок)
-        if sort_order.lower() == "asc":
-            distinct_query = distinct_query.distinct(Dialog.id).order_by(
-                Dialog.id,  # Первым должен быть столбец из DISTINCT ON
-                sort_column.asc()
-            )
-        else:
-            distinct_query = distinct_query.distinct(Dialog.id).order_by(
-                Dialog.id,  # Первым должен быть столбец из DISTINCT ON
-                sort_column.desc()
-            )
-        
-        # Применяем пагинацию
-        distinct_query = distinct_query.offset(offset).limit(size)
-        
-        # Выполняем запрос для получения ID
-        distinct_result = await db.execute(distinct_query)
-        dialog_ids = [row[0] for row in distinct_result.fetchall()]
-        
-        if not dialog_ids:
-            return {
-                "total_count": total_count,
-                "total_page": total_page,
-                "page": page,
-                "size": size,
-                "data": []
-            }
-        
-        # ТЕПЕРЬ ПОЛУЧАЕМ ПОЛНЫЕ ДАННЫЯ ДЛЯ ЭТИХ ID
-        main_query = select(
+        # Базовый запрос для получения диалогов с фильтрами по организации, сотруднику и диапазону дат
+        base_query = select(
             Dialog.id,
             Dialog.recording_start_date,
             Dialog.overall_score,
@@ -644,18 +542,61 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         ).join(
             Employee, Dialog.employee_id == Employee.id
         ).where(
-            Dialog.id.in_(dialog_ids)
+            Employee.organization_id == organization_id
         )
+        prom_result = await db.execute(base_query)
+        res = prom_result.fetchall()
+        get_logger(__name__).info(f'DASE QUERY - {res}')
+        # Добавляем JOIN для фильтра по словарю, если он указан
+        if dictionary_id:
+            base_query = base_query.where(
+                exists().where(
+                    and_(
+                        DialogDictionary.dialog_id == Dialog.id,
+                        DialogDictionary.dictionary_id == dictionary_id
+                    )
+                )
+            )
         
-        # Сохраняем порядок из оригинального запроса с помощью CASE
-        case_ordering = case(
-            {dialog_id: index for index, dialog_id in enumerate(dialog_ids)},
-            value=Dialog.id
-        )
-        main_query = main_query.order_by(case_ordering)
+        # Применяем фильтры
+        if start_date:
+            base_query = base_query.where(Dialog.recording_start_date >= start_date)
+        if end_date:
+            base_query = base_query.where(Dialog.recording_start_date <= end_date)
+        if employee_ids:
+            base_query = base_query.where(Employee.id.in_(employee_ids))
+        if conversation_type:
+            base_query = base_query.where(Dialog.conversation_type == conversation_type)
         
+        # Запрос для подсчета общего количества
+        count_query = select(func.count()).select_from(base_query.subquery())
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
+        
+        # Вычисляем пагинацию
+        total_page = (total_count + size - 1) // size  # Округление вверх
+        offset = (page - 1) * size
+        
+        # Применяем сортировку
+        if sort_by == "recording_start_date":
+            sort_column = Dialog.recording_start_date
+        elif sort_by == "overall_score":
+            sort_column = Dialog.overall_score
+        elif sort_by == "employee_name":
+            sort_column = Employee.first_name
+        else:
+            sort_column = Dialog.recording_start_date  # По умолчанию
+        
+        if sort_order.lower() == "asc":
+            main_query = base_query.order_by(sort_column.asc()).offset(offset).limit(size)
+        else:
+            main_query = base_query.order_by(sort_column.desc()).offset(offset).limit(size)
         result = await db.execute(main_query)
         rows = result.fetchall()
+        
+        # Получаем ID диалогов для запроса словарей
+        dialog_ids = [row.id for row in rows]
+        get_logger(__name__).info(f'DIALOG IDS - {dialog_ids}')
         
         # Запрос для получения словарей для всех диалогов
         dictionaries_query = select(
