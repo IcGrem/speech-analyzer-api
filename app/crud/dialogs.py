@@ -530,22 +530,23 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
     ) -> Dict[str, Any]:
         """Получить диалоги с пагинацией и фильтрами"""
         
-        # ПОДЗАПРОС 1: Получаем ID диалогов с фильтрами и сортировкой
-        # ВАЖНО: Добавляем все столбцы для сортировки в SELECT
-        dialog_subquery = select(
+        # Базовый запрос для получения диалогов с JOIN и фильтрами
+        base_query = select(
             Dialog.id,
-            Dialog.recording_start_date,  # Добавляем для сортировки
-            Dialog.overall_score,         # Добавляем для сортировки  
-            Employee.first_name           # Добавляем для сортировки по имени
+            Dialog.recording_start_date,
+            Dialog.overall_score,
+            Dialog.conversation_type,
+            Employee.first_name,
+            Employee.last_name
+        ).join(
+            Employee, Dialog.employee_id == Employee.id
+        ).where(
+            Employee.organization_id == organization_id
         )
-        
-        # JOIN с Employee для фильтра по организации
-        dialog_subquery = dialog_subquery.join(Employee, Dialog.employee_id == Employee.id)
-        dialog_subquery = dialog_subquery.where(Employee.organization_id == organization_id)
         
         # Добавляем JOIN для фильтра по словарю, если он указан
         if dictionary_id:
-            dialog_subquery = dialog_subquery.where(
+            base_query = base_query.where(
                 exists().where(
                     and_(
                         DialogDictionary.dialog_id == Dialog.id,
@@ -556,6 +557,39 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         
         # Применяем фильтры
         if start_date:
+            base_query = base_query.where(Dialog.recording_start_date >= start_date)
+        if end_date:
+            base_query = base_query.where(Dialog.recording_start_date <= end_date)
+        if employee_ids:
+            base_query = base_query.where(Employee.id.in_(employee_ids))
+        if conversation_type:
+            base_query = base_query.where(Dialog.conversation_type == conversation_type)
+        
+        # ПОДЗАПРОС: Получаем уникальные ID диалогов с правильной сортировкой
+        # Сначала создаем подзапрос для ID с сортировкой
+        dialog_subquery = select(
+            Dialog.id,
+            Dialog.recording_start_date,
+            Dialog.overall_score,
+            Employee.first_name
+        ).join(
+            Employee, Dialog.employee_id == Employee.id
+        ).where(
+            Employee.organization_id == organization_id
+        )
+        
+        # Применяем те же фильтры к подзапросу
+        if dictionary_id:
+            dialog_subquery = dialog_subquery.where(
+                exists().where(
+                    and_(
+                        DialogDictionary.dialog_id == Dialog.id,
+                        DialogDictionary.dictionary_id == dictionary_id
+                    )
+                )
+            )
+        
+        if start_date:
             dialog_subquery = dialog_subquery.where(Dialog.recording_start_date >= start_date)
         if end_date:
             dialog_subquery = dialog_subquery.where(Dialog.recording_start_date <= end_date)
@@ -564,7 +598,7 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         if conversation_type:
             dialog_subquery = dialog_subquery.where(Dialog.conversation_type == conversation_type)
         
-        # Применяем сортировку
+        # Применяем сортировку к подзапросу
         if sort_by == "recording_start_date":
             sort_column = Dialog.recording_start_date
         elif sort_by == "overall_score":
@@ -580,10 +614,9 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         else:
             dialog_subquery = dialog_subquery.order_by(sort_column.desc(), Dialog.id.desc())
         
-        # Запрос для подсчета общего количества (БЕЗ сортировки и пагинации)
-        count_query = select(func.count()).select_from(
-            dialog_subquery.with_only_columns([Dialog.id]).distinct().subquery()
-        )
+        # Запрос для подсчета общего количества (используем DISTINCT для устранения дубликатов)
+        count_subquery = dialog_subquery.with_only_columns(Dialog.id).distinct().subquery()
+        count_query = select(func.count()).select_from(count_subquery)
         total_count_result = await db.execute(count_query)
         total_count = total_count_result.scalar()
         
@@ -591,10 +624,8 @@ class CRUDDialog(CRUDBase[Dialog, DialogCreate, DialogUpdate]):
         total_page = (total_count + size - 1) // size
         offset = (page - 1) * size
         
-        # Применяем пагинацию и получаем только ID
-        dialog_ids_query = dialog_subquery.with_only_columns([Dialog.id]).distinct().offset(offset).limit(size)
-        
-        # Выполняем подзапрос для получения ID диалогов
+        # Получаем ID диалогов с пагинацией
+        dialog_ids_query = dialog_subquery.with_only_columns(Dialog.id).distinct().offset(offset).limit(size)
         dialog_ids_result = await db.execute(dialog_ids_query)
         paginated_dialog_ids = [row[0] for row in dialog_ids_result]
         
