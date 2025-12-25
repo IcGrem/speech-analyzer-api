@@ -1,12 +1,11 @@
 # Развёртывание `speech-analyzer-api` на Ubuntu “с нуля” (NVIDIA + CUDA + Docker + Python 3.12 + nginx + supervisor)
 
-Ниже — практическая пошаговая инструкция для чистого сервера Ubuntu. Команды рассчитаны на запуск от пользователя с `sudo`.
 
-> Важно: в шаблонах из `setup/` у вас есть плейсхолдеры вида `<имя-пользователя>` — их нужно заменить на реального Linux-пользователя (например `sa-admin`).
+> Важно: в шаблонах из `setup/` плейсхолдеры вида `<имя-пользователя>` нужно заменить на реального Linux-пользователя (например `sa-admin`).
 
 ---
 
-## 0) Переменные (подставьте свои)
+## Переменные, для удобного развёртывания
 
 ```bash
 export APP_USER="sa-admin"
@@ -56,9 +55,7 @@ sudo reboot
 nvidia-smi
 ```
 
-### 2.3 CUDA Toolkit (если нужно для вашего ML-стека)
-
-Способ зависит от версии Ubuntu и требований вашей модели. Универсальный путь — поставить CUDA из официального репозитория NVIDIA.
+### 2.3 CUDA Toolkit (опционально)
 
 1) Добавьте репозиторий CUDA (пример для Ubuntu 22.04; для 24.04 меняется `ubuntu2204` → `ubuntu2404`):
 
@@ -69,7 +66,7 @@ echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://devel
 sudo apt update
 ```
 
-2) Установите toolkit (пример: “дефолтный” metapackage):
+2) Установите toolkit:
 
 ```bash
 sudo apt -y install cuda-toolkit
@@ -96,32 +93,7 @@ ffmpeg -version
 
 ---
 
-## 4) Установка Certbot (Let’s Encrypt)
-
-Certbot нужен для выпуска/обновления TLS-сертификатов, которые использует ваш nginx-конфиг `setup/sa`.
-
-```bash
-sudo apt update
-sudo apt -y install certbot python3-certbot-nginx
-certbot --version
-```
-
-Выпуск сертификата (после того как DNS `DOMAIN` указывает на сервер, а 80/443 порты открыты):
-
-```bash
-sudo certbot --nginx -d "${DOMAIN}"
-```
-
-Проверка автообновления:
-
-```bash
-sudo systemctl status certbot.timer --no-pager || true
-sudo certbot renew --dry-run
-```
-
----
-
-## 5) Установка Docker и Compose (plugin)
+## 4) Установка Docker и Docker Compose
 
 ```bash
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -138,19 +110,19 @@ sudo systemctl enable --now docker
 sudo usermod -aG docker "${APP_USER}"
 ```
 
-Перелогиньтесь под пользователем (или `newgrp docker`), чтобы работали команды `docker` без `sudo`.
+Перелогиньтесь под пользователем, чтобы работали команды `docker` без `sudo`.
 
 ---
 
-## 6) Установка Python 3.12 и venv
+## 5) Установка Python 3.12 и venv
 
-### Вариант A (Ubuntu 24.04+)
+### Вариант на Ubuntu 24.04+
 
 ```bash
 sudo apt -y install python3.12 python3.12-venv python3.12-dev
 ```
 
-### Вариант B (Ubuntu 22.04: через deadsnakes PPA)
+### Вариант на Ubuntu 22.04
 
 ```bash
 sudo apt -y install software-properties-common
@@ -168,7 +140,7 @@ python3.12 -m pip install -U pip wheel setuptools
 
 ---
 
-## 7) Клонирование проекта из GitHub и подготовка окружения
+## 6) Клонирование проекта из GitHub и подготовка окружения
 
 Переключитесь на пользователя приложения:
 
@@ -184,21 +156,17 @@ git clone <SSH_ИЛИ_HTTPS_URL_ВАШЕГО_REPO> speech-analyzer-api
 cd "${APP_DIR}"
 ```
 
-Создайте `.env` (переменные используются в `docker-compose.db.yml` и обычно в приложении):
+Создайте `.env`:
 
 ```bash
-cp env.example .env
 nano .env
 ```
 
-Минимально убедитесь, что в `.env` заданы:
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-- `POSTGRES_DB`
+Список переменных окружения и их значения см. в файле .prod.env
 
 ---
 
-## 8) Создание виртуального окружения, активация, зависимости
+## 7) Создание виртуального окружения, активация, зависимости
 
 ```bash
 cd "${APP_DIR}"
@@ -210,7 +178,7 @@ pip install -r requirements.txt
 
 ---
 
-## 9) Запуск БД (docker-compose.db.yml)
+## 8) Запуск БД (docker-compose.db.yml)
 
 Из каталога проекта:
 
@@ -224,17 +192,11 @@ docker compose -f docker-compose.db.yml up -d
 docker compose -f docker-compose.db.yml ps
 ```
 
-Проверка готовности:
-
-```bash
-docker compose -f docker-compose.db.yml logs -n 200 postgres
-```
-
 ---
 
-## 10) Подготовка каталогов под socket/logs (требуется для ваших шаблонов)
+## 9) Подготовка каталогов под socket/logs
 
-В `setup/gunicorn_start` bind идёт в `unix:$DIR/run/gunicorn.sock`, а supervisor пишет лог в `logs/…`.
+В `gunicorn_start` bind идёт в `unix:$DIR/run/gunicorn.sock`. Supervisor пишет лог в `logs/…`.
 
 ```bash
 cd "${APP_DIR}"
@@ -245,13 +207,13 @@ chmod 755 run logs
 Скопируйте и сделайте скрипт запуска исполняемым:
 
 ```bash
-sudo cp "${APP_DIR}/setup/sa.conf" "${APP_DIR}/sa.conf"
+sudo cp "${APP_DIR}/setup/gunicorn_start" "${APP_DIR}/gunicorn_start"
 chmod +x "${APP_DIR}/gunicorn_start"
 ```
 
 ---
 
-## 11) Настройка supervisor (используем `setup/sa.conf` и `setup/gunicorn_start`)
+## 10) Настройка supervisor (используем `setup/sa.conf` и `gunicorn_start`)
 
 Установите supervisor:
 
@@ -267,10 +229,7 @@ sudo cp "${APP_DIR}/setup/sa.conf" /etc/supervisor/conf.d/speech-analyzer-api.co
 sudo nano /etc/supervisor/conf.d/speech-analyzer-api.conf
 ```
 
-В файле `/etc/supervisor/conf.d/speech-analyzer-api.conf` замените:
-- `command=/home/<имя-пользователя>/speech-analyzer-api/gunicorn_start` → на **ваш путь** к скрипту
-- `user=<имя-пользователя>` → на **ваш пользователя**, например `${APP_USER}`
-- `stdout_logfile=/home/<имя-пользователя>/speech-analyzer-api/logs/gunicorn-error.log` → на **ваш путь** к логам
+В файле `/etc/supervisor/conf.d/speech-analyzer-api.conf` замените `<имя-пользователя>` на **имя пользователя** системы, или, например, на `${APP_USER}`
 
 
 Перечитать конфиги supervisor и запустить:
@@ -284,7 +243,7 @@ sudo supervisorctl status
 
 ---
 
-## 12) nginx: установка и подключение конфига из `setup/sa`
+## 11) nginx: установка и подключение конфига из `setup/sa`
 
 Установка:
 
@@ -301,10 +260,8 @@ sudo nano /etc/nginx/sites-available/sa
 ```
 
 Что нужно заменить/проверить в `/etc/nginx/sites-available/sa`:
-- `server_name ssa.ai-check.ru;` → **ваш домен/адрес**
-- пути сертификатов Let’s Encrypt (`/etc/letsencrypt/live/...`) → **ваши** (или временно уберите https-блок и оставьте только `listen 80;`)
-- `proxy_pass http://127.0.0.1:8000;` → **если у вас приложение реально слушает 8000 TCP**.  
-- `alias /home/sa-admin/speech-analyzer-api/speech-data/;` → привести к **реальному пути** на сервере (обычно это `${APP_DIR}/speech-data/`)
+- `server_name ssa.ai-check.ru;` на **свой домен/адрес**
+- `alias /home/sa-admin/speech-analyzer-api/speech-data/;` привести к **реальному пути** на сервере если отличается
 
 
 Включите сайт и перезагрузите nginx:
@@ -317,6 +274,30 @@ sudo systemctl reload nginx
 
 ---
 
+## 12) Установка Certbot (Let’s Encrypt)
+
+Certbot нужен для выпуска/обновления TLS-сертификатов.
+
+```bash
+sudo apt update
+sudo apt -y install certbot python3-certbot-nginx
+certbot --version
+```
+
+Выпуск сертификата:
+
+```bash
+sudo certbot --nginx -d "${DOMAIN}"
+```
+
+Проверка автообновления:
+
+```bash
+sudo systemctl status certbot.timer --no-pager || true
+sudo certbot renew --dry-run
+```
+
+---
 ## 13) Финальный запуск/проверка
 
 Проверьте статус supervisor и сокет:
